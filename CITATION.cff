@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the NOS paper."
+title: "Network-Optimised Spiking (NOS) reference code and demos"
+type: software
+authors:
+  - family-names: Bilal
+    given-names: Muhammad
+repository-code: "https://github.com/USERNAME/REPO"
+url: "https://github.com/USERNAME/REPO"
+license: MIT
+preferred-citation:
+  type: article
+  title: "Network-Optimised Spiking Neural Network for Event-Driven Networking"
+  authors:
+    - family-names: Bilal
+      given-names: Muhammad
+  year: 2025
+  journal: "arXiv preprint"
+  doi: "10.48550/arXiv.2509.23516"
+  url: "https://arxiv.org/abs/2509.23516"
+  identifiers:
+    - type: other
+      value: "arXiv:2509.23516"

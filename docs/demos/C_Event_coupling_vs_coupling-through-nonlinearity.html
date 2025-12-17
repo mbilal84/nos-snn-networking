@@ -1,0 +1,856 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>NOS Demo B: Event coupling vs coupling-through-nonlinearity</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#111823; --panel2:#0f1620; --fg:#e6edf3; --muted:#9fb0c0;
+    --accent:#7aa2ff; --line:#223044; --good:#7ee787; --bad:#ff6b6b; --warn:#ffcc66;
+  }
+  body{margin:0; background:var(--bg); color:var(--fg); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;}
+  .wrap{max-width:1220px; margin:18px auto; padding:0 14px;}
+  h1{font-size:20px; margin:0 0 8px 0; font-weight:700;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 14px 0; line-height:1.35;}
+  .grid{display:grid; grid-template-columns: 390px 1fr; gap:14px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px;}
+  .card h2{font-size:14px; margin:0 0 10px 0; font-weight:700;}
+  label{display:block; font-size:12px; color:var(--muted); margin:10px 0 6px;}
+  select,input[type="range"],input[type="number"]{width:100%;}
+  select, input[type="number"]{
+    background:var(--panel2); border:1px solid var(--line); color:var(--fg);
+    padding:8px 9px; border-radius:10px; font-size:13px; outline:none;
+  }
+  input[type="range"]{accent-color:var(--accent);}
+  .row{display:grid; grid-template-columns: 1fr 1fr; gap:10px;}
+  .row3{display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;}
+  .btns{display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;}
+  .btn{
+    background:transparent; border:1px solid var(--line); color:var(--fg);
+    padding:8px 10px; border-radius:10px; cursor:pointer; font-size:13px;
+  }
+  .btn:hover{border-color:rgba(122,162,255,0.55);}
+  .small{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.35;}
+  canvas{width:100%; height:540px; background:rgba(255,255,255,0.01); border:1px solid var(--line); border-radius:14px;}
+  .kvs{display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:baseline; border-top:1px dashed var(--line); padding-top:10px; margin-top:10px;}
+  .kvs .k{color:var(--muted); font-size:13px;}
+  .kvs div{font-size:13px;}
+  .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); background:rgba(255,255,255,0.02);}
+  .good{color:var(--good); border-color:rgba(126,231,135,0.35);}
+  .bad{color:var(--bad); border-color:rgba(255,107,107,0.35);}
+  .warn{color:var(--warn); border-color:rgba(255,204,102,0.35);}
+  details{border:1px solid var(--line); border-radius:12px; padding:8px 10px; background:rgba(255,255,255,0.02); margin-top:12px;}
+  summary{cursor:pointer; font-weight:700;}
+  code{background:rgba(255,255,255,0.05); padding:1px 6px; border-radius:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NOS Demo B: Event coupling vs coupling-through-nonlinearity</h1>
+  <p class="sub">
+    Two side-by-side simulations of the same NOS cell dynamics <code>(v,u)</code> with identical topology and noise.
+    Left uses the paper-style <span class="badge good">event-based coupling</span>:
+    <code>I(t)=k W S(t-τ)</code>.
+    Right uses a deliberately <span class="badge warn">deprecated</span> continuous coupling:
+    <code>I(t)=k W g(v(t))</code> (a common conceptual mistake).
+    This demo is forward simulation only, not a training surrogate.
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Controls</h2>
+
+      <label>Topology preset</label>
+      <select id="topology">
+        <option value="ring">Ring</option>
+        <option value="chain">Chain</option>
+        <option value="star">Star</option>
+        <option value="er">Erdős–Rényi</option>
+        <option value="ba">Scale-free (BA)</option>
+        <option value="sw">Small-world (WS)</option>
+      </select>
+
+      <div class="row">
+        <div>
+          <label>N (nodes)</label>
+          <input id="N" type="range" min="12" max="80" step="1" value="36"/>
+          <div class="small"><span id="Nval">36</span></div>
+        </div>
+        <div>
+          <label>Mean degree / k</label>
+          <input id="kdeg" type="range" min="2" max="20" step="1" value="6"/>
+          <div class="small"><span id="kdegval">6</span></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Weight model</label>
+          <select id="wmodel">
+            <option value="binary">Binary</option>
+            <option value="uniform">Uniform [0,1]</option>
+            <option value="gauss">Gaussian |N(0,1)|</option>
+          </select>
+        </div>
+        <div>
+          <label>Seed</label>
+          <input id="seed" type="number" min="0" step="1" value="7"/>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label><input id="sym" type="checkbox" checked/> Symmetrise W</label>
+          <div class="small">Keeps topology comparable and avoids sign issues.</div>
+        </div>
+        <div>
+          <label><input id="normrho" type="checkbox"/> Normalise to ρ(W)=1</label>
+          <div class="small">Separates topology effects from gain scaling.</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Coupling gain k</label>
+          <input id="k" type="range" min="0" max="2.0" step="0.001" value="0.40"/>
+          <div class="small">k = <span id="kval">0.400</span></div>
+        </div>
+        <div>
+          <label>Delay scale τ₀ (ms)</label>
+          <input id="tau0" type="range" min="0" max="20" step="0.1" value="6.0"/>
+          <div class="small">τ₀ = <span id="tau0val">6.0</span> ms</div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Simulation length T (s)</label>
+          <input id="T" type="range" min="0.5" max="6.0" step="0.1" value="2.0"/>
+          <div class="small">T = <span id="Tval">2.0</span> s</div>
+        </div>
+        <div>
+          <label>dt (ms)</label>
+          <select id="dtms">
+            <option value="0.5">0.5</option>
+            <option value="1.0">1.0</option>
+            <option value="2.0">2.0</option>
+          </select>
+          <div class="small">Smaller dt is slower but more stable.</div>
+        </div>
+      </div>
+
+      <details>
+        <summary>NOS parameters (subset)</summary>
+        <div class="small">These match the form used in <code>nos.py</code>:<br>
+          <code>dv = f_sat(v)+ (β−λ−χ)v − u + γ + χ v_rest + I</code>,<br>
+          <code>du = a(bv−u) − μu</code>, spike if <code>v_new ≥ θ</code>, then pullback reset to <code>c_reset</code> with <code>u += du_spike</code>.
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>α</label>
+            <input id="alpha" type="range" min="0" max="1.0" step="0.001" value="0.10"/>
+            <div class="small"><span id="alphaval">0.10</span></div>
+          </div>
+          <div>
+            <label>κ</label>
+            <input id="kappa" type="range" min="0" max="10.0" step="0.001" value="0.00"/>
+            <div class="small"><span id="kappaval">0.00</span></div>
+          </div>
+          <div>
+            <label>β</label>
+            <input id="beta" type="range" min="-2.0" max="2.0" step="0.001" value="0.80"/>
+            <div class="small"><span id="betaval">0.80</span></div>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>λ</label>
+            <input id="lam" type="range" min="0" max="3.0" step="0.001" value="0.40"/>
+            <div class="small"><span id="lamval">0.40</span></div>
+          </div>
+          <div>
+            <label>χ</label>
+            <input id="chi" type="range" min="0" max="3.0" step="0.001" value="0.00"/>
+            <div class="small"><span id="chival">0.00</span></div>
+          </div>
+          <div>
+            <label>γ</label>
+            <input id="gamma" type="range" min="-1.0" max="1.0" step="0.001" value="0.02"/>
+            <div class="small"><span id="gammaval">0.02</span></div>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>a</label>
+            <input id="a" type="range" min="0.01" max="5.0" step="0.001" value="1.00"/>
+            <div class="small"><span id="aval">1.00</span></div>
+          </div>
+          <div>
+            <label>b</label>
+            <input id="b" type="range" min="0.01" max="5.0" step="0.001" value="1.00"/>
+            <div class="small"><span id="bval">1.00</span></div>
+          </div>
+          <div>
+            <label>μ</label>
+            <input id="mu" type="range" min="0.00" max="5.0" step="0.001" value="0.20"/>
+            <div class="small"><span id="muval">0.20</span></div>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>θ (threshold)</label>
+            <input id="theta" type="range" min="0.1" max="2.0" step="0.001" value="1.00"/>
+            <div class="small"><span id="thetaval">1.00</span></div>
+          </div>
+          <div>
+            <label>ρ_reset</label>
+            <input id="rreset" type="range" min="0.0" max="50.0" step="0.01" value="6.0"/>
+            <div class="small"><span id="rresetval">6.0</span></div>
+          </div>
+          <div>
+            <label>c_reset</label>
+            <input id="creset" type="range" min="-1.0" max="1.0" step="0.001" value="0.00"/>
+            <div class="small"><span id="cresetval">0.00</span></div>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>du_spike</label>
+            <input id="duspike" type="range" min="0.0" max="2.0" step="0.001" value="0.50"/>
+            <div class="small"><span id="duspikeval">0.50</span></div>
+          </div>
+          <div>
+            <label>I_base</label>
+            <input id="Ibase" type="range" min="0.0" max="2.0" step="0.001" value="0.45"/>
+            <div class="small"><span id="Ibaseval">0.45</span></div>
+          </div>
+          <div>
+            <label>Noise σ (additive)</label>
+            <input id="noise" type="range" min="0.0" max="0.5" step="0.001" value="0.02"/>
+            <div class="small"><span id="noiseval">0.02</span></div>
+          </div>
+        </div>
+
+        <label>Deprecated coupling g(v) for the right panel</label>
+        <select id="gv">
+          <option value="sigmoid">sigmoid(v−θ)</option>
+          <option value="vclip">clip(v,0,1)</option>
+          <option value="fsat">f_sat(v) (bounded)</option>
+        </select>
+      </details>
+
+      <div class="btns">
+        <button class="btn" id="run">Run simulation</button>
+        <button class="btn" id="export">Export JSON</button>
+        <button class="btn" id="regen">Regenerate W</button>
+      </div>
+
+      <div id="status" class="small" style="margin-top:10px;"></div>
+
+      <div class="kvs">
+        <div class="k">ρ(W) (raw)</div><div id="rhoRaw">–</div>
+        <div class="k">ρ(W) (used)</div><div id="rhoUsed">–</div>
+        <div class="k">k ρ(W)</div><div id="krho">–</div>
+        <div class="k">Event panel burst index</div><div id="bEvent">–</div>
+        <div class="k">Deprecated panel burst index</div><div id="bBad">–</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Output</h2>
+      <canvas id="plot" width="1000" height="540"></canvas>
+      <div class="small" style="margin-top:10px;">
+        Top: raster plots (left event coupling, right deprecated coupling). Bottom: population spike count (binned).
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------------- RNG ---------------- */
+function mulberry32(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------------- Matrix + graph builders (nonnegative) ---------------- */
+function zeros(n){ return new Float64Array(n); }
+function matZeros(n){ const A=new Array(n); for(let i=0;i<n;i++) A[i]=zeros(n); return A; }
+function matSym(A){ const n=A.length; for(let i=0;i<n;i++) for(let j=i+1;j<n;j++){ const v=0.5*(A[i][j]+A[j][i]); A[i][j]=v; A[j][i]=v; } }
+function matScale(A,s){ const n=A.length; for(let i=0;i<n;i++){ const r=A[i]; for(let j=0;j<n;j++) r[j]*=s; } }
+function matVec(A,x,out){ const n=A.length; for(let i=0;i<n;i++){ let acc=0; const r=A[i]; for(let j=0;j<n;j++) acc+=r[j]*x[j]; out[i]=acc; } }
+function dot(x,y){ let s=0; for(let i=0;i<x.length;i++) s+=x[i]*y[i]; return s; }
+function norm2(x){ return Math.sqrt(dot(x,x)); }
+
+/* Power iteration for symmetric nonnegative matrices */
+function spectralRadius(A,iters=70){
+  const n=A.length;
+  let x=zeros(n); for(let i=0;i<n;i++) x[i]=1.0/n;
+  let y=zeros(n); let lam=0;
+  for(let t=0;t<iters;t++){
+    matVec(A,x,y);
+    const ny=norm2(y); if(ny===0) return 0;
+    for(let i=0;i<n;i++) x[i]=y[i]/ny;
+    matVec(A,x,y);
+    lam=dot(x,y);
+  }
+  return Math.abs(lam);
+}
+
+function weightSample(rng, model){
+  if(model==="binary") return 1.0;
+  if(model==="uniform") return rng();
+  // abs Gaussian
+  let u=1e-12 + rng(), v=1e-12 + rng();
+  let z = Math.sqrt(-2.0*Math.log(u))*Math.cos(2.0*Math.PI*v);
+  return Math.abs(z);
+}
+function addEdge(A,i,j,w){ if(i!==j) A[i][j]=w; }
+function buildChain(n,rng,wmodel){
+  const A=matZeros(n);
+  for(let i=0;i<n-1;i++){ const w=weightSample(rng,wmodel); addEdge(A,i,i+1,w); addEdge(A,i+1,i,w); }
+  return A;
+}
+function buildRing(n,kdeg,rng,wmodel){
+  const A=matZeros(n);
+  const k=Math.max(2,kdeg|0), half=Math.floor(k/2);
+  for(let i=0;i<n;i++){
+    for(let d=1; d<=half; d++){
+      const j=(i+d)%n; const w=weightSample(rng,wmodel);
+      addEdge(A,i,j,w); addEdge(A,j,i,w);
+    }
+  }
+  return A;
+}
+function buildStar(n,rng,wmodel){
+  const A=matZeros(n), c=0;
+  for(let i=1;i<n;i++){ const w=weightSample(rng,wmodel); addEdge(A,c,i,w); addEdge(A,i,c,w); }
+  return A;
+}
+function buildER(n,kdeg,rng,wmodel){
+  const A=matZeros(n);
+  const p=Math.min(1.0, Math.max(0.0, kdeg/(n-1)));
+  for(let i=0;i<n;i++){
+    for(let j=i+1;j<n;j++){
+      if(rng()<p){ const w=weightSample(rng,wmodel); addEdge(A,i,j,w); addEdge(A,j,i,w); }
+    }
+  }
+  return A;
+}
+function buildBA(n,kdeg,rng,wmodel){
+  const m=Math.max(1, Math.floor(kdeg/2));
+  const m0=Math.max(m+1,4);
+  const A=matZeros(n);
+  let deg=new Float64Array(n);
+
+  for(let i=0;i<m0;i++){
+    for(let j=i+1;j<m0;j++){
+      const w=weightSample(rng,wmodel);
+      addEdge(A,i,j,w); addEdge(A,j,i,w);
+      deg[i]++; deg[j]++;
+    }
+  }
+  let sumDeg=0; for(let i=0;i<m0;i++) sumDeg+=deg[i];
+
+  for(let node=m0; node<n; node++){
+    const targets=new Set();
+    while(targets.size < m){
+      const r=rng()*sumDeg;
+      let acc=0, pick=0;
+      for(let i=0;i<node;i++){ acc+=deg[i]; if(acc>=r){ pick=i; break; } }
+      targets.add(pick);
+    }
+    for(const t of targets){
+      const w=weightSample(rng,wmodel);
+      addEdge(A,node,t,w); addEdge(A,t,node,w);
+      deg[node]++; deg[t]++; sumDeg += 2;
+    }
+  }
+  return A;
+}
+function buildSW(n,kdeg,rng,wmodel){
+  const pRewire=0.10;
+  const A=matZeros(n);
+  const k=Math.max(2,kdeg|0), half=Math.floor(k/2);
+  for(let i=0;i<n;i++){
+    for(let d=1; d<=half; d++){
+      let j=(i+d)%n;
+      if(rng()<pRewire){
+        let cand=Math.floor(rng()*n);
+        while(cand===i) cand=Math.floor(rng()*n);
+        j=cand;
+      }
+      const w=weightSample(rng,wmodel);
+      addEdge(A,i,j,w); addEdge(A,j,i,w);
+    }
+  }
+  return A;
+}
+
+/* ---------------- Delays ---------------- */
+function buildDelaysSteps(n, dt, tau0_ms, rng){
+  // Uniform tau0 plus +-30% jitter on existing edges later; here provide per pair delay.
+  const Dij = new Array(n);
+  const base = Math.max(0, tau0_ms/1000.0);
+  for(let i=0;i<n;i++){
+    Dij[i]=new Int32Array(n);
+    for(let j=0;j<n;j++){
+      if(i===j){ Dij[i][j]=0; continue; }
+      const jitter = (rng()*2-1) * 0.30 * base;
+      const tau = Math.max(0, base + jitter);
+      Dij[i][j] = Math.max(1, Math.round(tau / dt)); // >=1 step to avoid same-step algebraic loops
+    }
+  }
+  return Dij;
+}
+
+/* ---------------- NOS dynamics (matches nos.py form) ---------------- */
+function f_sat(v, alpha, kappa){
+  const den = 1.0 + kappa*v*v;
+  return alpha * (v*v) / den;
+}
+function nos_step(v,u,I,dt,p,rng){
+  const N=v.length;
+  const expPull = Math.exp(-p.rho_reset*dt);
+
+  const spikes = new Uint8Array(N);
+  const v_new = new Float64Array(N);
+  const u_new = new Float64Array(N);
+
+  for(let i=0;i<N;i++){
+    const fs = f_sat(v[i], p.alpha, p.kappa);
+    const dv = fs + (p.beta - p.lam - p.chi)*v[i] - u[i] + p.gamma + p.chi*p.v_rest + I[i];
+    const du = p.a*(p.b*v[i] - u[i]) - p.mu*u[i];
+
+    let vn = v[i] + dt*dv;
+    let un = u[i] + dt*du;
+
+    // additive noise on dv was applied via I already; keep simple: noise injected in I
+    if(vn >= p.theta){
+      spikes[i]=1;
+      vn = p.c_reset + (vn - p.c_reset)*expPull; // pullback reset
+      un = un + p.du_spike;
+    }
+    // optional clip
+    if(p.v_clip_lo !== null && vn < p.v_clip_lo) vn = p.v_clip_lo;
+    if(p.v_clip_hi !== null && vn > p.v_clip_hi) vn = p.v_clip_hi;
+
+    v_new[i]=vn; u_new[i]=un;
+  }
+  return {v:v_new, u:u_new, spikes:spikes};
+}
+
+/* Deprecated coupling functions g(v) */
+function g_of_v(v, p, kind){
+  if(kind==="vclip"){
+    // clip(v,0,1)
+    return Math.max(0.0, Math.min(1.0, v));
+  }
+  if(kind==="fsat"){
+    // Use the same bounded nonlinearity as the NOS cell (so α, κ knobs affect this panel too)
+    return f_sat(v, p.alpha, p.kappa);
+  }
+  // sigmoid around threshold
+  const s = 8.0;
+  return 1.0/(1.0 + Math.exp(-s*(v - p.theta)));
+}
+
+/* ---------------- Simulation core ---------------- */
+let W=null, rhoRaw=0.0, rhoUsed=0.0, Dij=null, meta=null;
+let lastResult=null;
+
+function readNum(id){ return parseFloat(document.getElementById(id).value); }
+function readInt(id){ return parseInt(document.getElementById(id).value,10); }
+function setText(id,s){ document.getElementById(id).textContent=s; }
+function fmt(x,d=4){ return isFinite(x) ? x.toFixed(d) : "–"; }
+
+function regenerateW(){
+  const topo=document.getElementById("topology").value;
+  const N=readInt("N");
+  const kdeg=readInt("kdeg");
+  const seed=readInt("seed");
+  const wmodel=document.getElementById("wmodel").value;
+  const sym=document.getElementById("sym").checked;
+  const normrho=document.getElementById("normrho").checked;
+
+  const rng = mulberry32((seed + 10007) ^ (N*2654435761));
+  if(topo==="ring") W=buildRing(N,kdeg,rng,wmodel);
+  else if(topo==="chain") W=buildChain(N,rng,wmodel);
+  else if(topo==="star") W=buildStar(N,rng,wmodel);
+  else if(topo==="er") W=buildER(N,kdeg,rng,wmodel);
+  else if(topo==="ba") W=buildBA(N,kdeg,rng,wmodel);
+  else W=buildSW(N,kdeg,rng,wmodel);
+
+  if(sym) matSym(W);
+
+  rhoRaw = spectralRadius(W, 80);
+  rhoUsed = rhoRaw;
+
+  if(normrho && rhoRaw>0){
+    matScale(W, 1.0/rhoRaw);
+    rhoUsed = spectralRadius(W, 80);
+  }
+
+  // Delays use a separate RNG so W changes do not change delay field unexpectedly.
+  const dt = readNum("dtms")/1000.0;
+  const tau0 = readNum("tau0");
+  const rngD = mulberry32((seed + 424242) ^ (N*1597334677));
+  Dij = buildDelaysSteps(N, dt, tau0, rngD);
+
+  meta = {topology:topo,N:N,kdeg:kdeg,seed:seed,wmodel:wmodel,sym:sym,normrho:normrho,rhoRaw:rhoRaw,rhoUsed:rhoUsed,tau0_ms:tau0,dt:dt};
+  setText("rhoRaw", fmt(rhoRaw,4));
+  setText("rhoUsed", fmt(rhoUsed,4));
+  setText("status", "W regenerated. Click Run simulation.");
+  updateDerived();
+}
+
+function updateDerived(){
+  setText("Nval", String(readInt("N")));
+  setText("kdegval", String(readInt("kdeg")));
+  setText("kval", fmt(readNum("k"),3));
+  setText("tau0val", fmt(readNum("tau0"),1));
+  setText("Tval", fmt(readNum("T"),1));
+  setText("alphaval", fmt(readNum("alpha"),2));
+  setText("kappaval", fmt(readNum("kappa"),2));
+  setText("betaval", fmt(readNum("beta"),2));
+  setText("lamval", fmt(readNum("lam"),2));
+  setText("chival", fmt(readNum("chi"),2));
+  setText("gammaval", fmt(readNum("gamma"),2));
+  setText("aval", fmt(readNum("a"),2));
+  setText("bval", fmt(readNum("b"),2));
+  setText("muval", fmt(readNum("mu"),2));
+  setText("thetaval", fmt(readNum("theta"),2));
+  setText("rresetval", fmt(readNum("rreset"),1));
+  setText("cresetval", fmt(readNum("creset"),2));
+  setText("duspikeval", fmt(readNum("duspike"),2));
+  setText("Ibaseval", fmt(readNum("Ibase"),2));
+  setText("noiseval", fmt(readNum("noise"),2));
+
+  const k=readNum("k");
+  setText("krho", fmt(k*rhoUsed,4));
+}
+
+/* Compute burst index from binned counts: std/mean */
+function burstIndex(counts){
+  let m=0; for(const c of counts) m+=c; m/=counts.length;
+  let v=0; for(const c of counts) v+=(c-m)*(c-m); v/=counts.length;
+  const s=Math.sqrt(v);
+  return (m>1e-9) ? (s/m) : NaN;
+}
+
+function runSimulation(){
+  if(W===null) regenerateW();
+  const N=W.length;
+  const k=readNum("k");
+  const T=readNum("T");
+  const dt=readNum("dtms")/1000.0;
+  const steps=Math.max(1, Math.floor(T/dt));
+
+  // Parameters (subset of nos.py)
+  const p = {
+    alpha: readNum("alpha"),
+    kappa: readNum("kappa"),
+    beta: readNum("beta"),
+    lam: readNum("lam"),
+    chi: readNum("chi"),
+    gamma: readNum("gamma"),
+    v_rest: 0.0,
+    a: readNum("a"),
+    b: readNum("b"),
+    mu: readNum("mu"),
+    theta: readNum("theta"),
+    rho_reset: readNum("rreset"),
+    c_reset: readNum("creset"),
+    du_spike: readNum("duspike"),
+    v_clip_lo: null,
+    v_clip_hi: null
+  };
+
+  const I_base = readNum("Ibase");
+  const noiseStd = readNum("noise");
+
+  const seed=readInt("seed");
+  const rng = mulberry32(seed ^ 0xA53C9E13);
+
+  // initial states
+  let vE=zeros(N), uE=zeros(N);
+  let vB=zeros(N), uB=zeros(N);
+  for(let i=0;i<N;i++){
+    vE[i]=0.05 + 0.10*(rng()*2-1);
+    vB[i]=vE[i];
+    uE[i]=0.00;
+    uB[i]=0.00;
+  }
+
+  // event coupling ring buffer
+  const maxD = (function(){
+    let m=0;
+    for(let i=0;i<N;i++){
+      const row=Dij[i];
+      for(let j=0;j<N;j++) if(row[j]>m) m=row[j];
+    }
+    return m;
+  })();
+  const L = Math.max(1, maxD+1);
+  const spikeHist = new Array(L);
+  for(let t=0;t<L;t++) spikeHist[t]=new Uint8Array(N);
+
+  // storage for plotting (binary spikes)
+  const spikesE = new Array(steps);
+  const spikesB = new Array(steps);
+  const popE = new Int32Array(steps);
+  const popB = new Int32Array(steps);
+
+  // temporary vectors
+  const I_E=zeros(N);
+  const I_B=zeros(N);
+  const noiseVec=zeros(N);
+  const gVec=zeros(N);
+
+  const gvKind = document.getElementById("gv").value;
+
+  for(let t=0;t<steps;t++){
+    // shared noise (same for both panels)
+    for(let i=0;i<N;i++){
+      const z = (rng()*2-1); // uniform noise; fine for a demo
+      noiseVec[i] = noiseStd * z;
+    }
+
+    // --- Event coupling: I = k W S(t-τ) + I_base + noise
+    for(let i=0;i<N;i++){
+      let acc=0.0;
+      const row=W[i];
+      const drow=Dij[i];
+      for(let j=0;j<N;j++){
+        const w = row[j];
+        if(w===0) continue;
+        const d = drow[j];
+        const idx = (t - d);
+        const s = spikeHist[( (idx%L)+L )%L][j];
+        acc += w * s;
+      }
+      I_E[i] = I_base + k*acc + noiseVec[i];
+    }
+
+    // --- Deprecated coupling: I = k W g(v(t)) + I_base + noise
+    // compute g(v)
+    for(let j=0;j<N;j++) gVec[j] = g_of_v(vB[j], p, gvKind);
+    matVec(W, gVec, I_B);
+    for(let i=0;i<N;i++){
+      I_B[i] = I_base + k*I_B[i] + noiseVec[i];
+    }
+
+    // step both
+    const outE = nos_step(vE,uE,I_E,dt,p,rng);
+    const outB = nos_step(vB,uB,I_B,dt,p,rng);
+
+    vE=outE.v; uE=outE.u;
+    vB=outB.v; uB=outB.u;
+
+    const sE=outE.spikes;
+    const sB=outB.spikes;
+
+    spikesE[t]=sE;
+    spikesB[t]=sB;
+
+    let cE=0, cB=0;
+    for(let i=0;i<N;i++){ cE += sE[i]; cB += sB[i]; }
+    popE[t]=cE; popB[t]=cB;
+
+    // update ring buffer for event mode
+    spikeHist[t % L] = sE;
+  }
+
+  // bin population counts for bottom plot (5 ms bins)
+  const bin_ms=5.0;
+  const binSteps = Math.max(1, Math.round((bin_ms/1000.0)/dt));
+  const bins = Math.floor(steps/binSteps);
+  const popEbin=new Float64Array(bins);
+  const popBbin=new Float64Array(bins);
+  for(let b0=0;b0<bins;b0++){
+    let aE=0,aB=0;
+    const start=b0*binSteps, end=start+binSteps;
+    for(let t=start;t<end;t++){ aE+=popE[t]; aB+=popB[t]; }
+    popEbin[b0]=aE; popBbin[b0]=aB;
+  }
+
+  lastResult = {meta:meta, params:p, k:k, dt:dt, T:T, steps:steps, spikesE:spikesE, spikesB:spikesB, popEbin:popEbin, popBbin:popBbin, bin_ms:bin_ms};
+
+  const bE = burstIndex(popEbin);
+  const bB = burstIndex(popBbin);
+  setText("bEvent", fmt(bE,3));
+  setText("bBad", fmt(bB,3));
+
+  draw(lastResult);
+  setText("status", "Done. The right panel is intentionally the wrong coupling for comparison.");
+}
+
+/* ---------------- Drawing ---------------- */
+const canvas=document.getElementById("plot");
+const ctx=canvas.getContext("2d");
+
+function draw(res){
+  const W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  const pad=16;
+  const midW = Math.floor(W/2);
+  const topH = 360;
+  const botY = topH + 22;
+
+  // Titles
+  ctx.fillStyle="rgba(230,237,243,0.95)";
+  ctx.font="14px ui-sans-serif, system-ui";
+  ctx.fillText("Event coupling: I = k W S(t−τ)", pad, 18);
+  ctx.fillText("Deprecated coupling: I = k W g(v(t))", midW+pad, 18);
+
+  // Raster frames
+  const N = res.meta.N;
+  const steps = res.steps;
+  const dt = res.dt;
+  const tmax = res.T;
+
+  const x0L = pad, x1L = midW-pad;
+  const x0R = midW+pad, x1R = W-pad;
+  const y0 = 36, y1 = topH;
+
+  // axes lines
+  ctx.strokeStyle="rgba(159,176,192,0.25)";
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.rect(x0L,y0,x1L-x0L,y1-y0);
+  ctx.rect(x0R,y0,x1R-x0R,y1-y0);
+  ctx.stroke();
+
+  function plotRaster(spikesArr, x0, x1){
+    const w = x1-x0;
+    const h = y1-y0;
+    const x2px = t => x0 + (t/tmax)*w;
+    const y2py = i => y0 + (i+0.5)/N*h;
+
+    ctx.fillStyle="rgba(231,236,243,0.92)";
+    // draw sparsely: step stride if huge
+    const stride = (steps>6000) ? 2 : 1;
+    for(let t=0; t<steps; t+=stride){
+      const s = spikesArr[t];
+      if(!s) continue;
+      const tt = t*dt;
+      const px = x2px(tt);
+      for(let i=0;i<N;i++){
+        if(s[i]){
+          const py = y2py(i);
+          ctx.fillRect(px, py-1, 1.3, 2.0);
+        }
+      }
+    }
+  }
+
+  plotRaster(res.spikesE, x0L, x1L);
+  plotRaster(res.spikesB, x0R, x1R);
+
+  // Bottom plot: binned population counts
+  const bx0=pad, bx1=W-pad, by0=botY, by1=H-pad;
+  ctx.strokeStyle="rgba(159,176,192,0.25)";
+  ctx.beginPath(); ctx.rect(bx0,by0,bx1-bx0,by1-by0); ctx.stroke();
+
+  const bins=res.popEbin.length;
+  let ymax=1;
+  for(let i=0;i<bins;i++){
+    if(res.popEbin[i]>ymax) ymax=res.popEbin[i];
+    if(res.popBbin[i]>ymax) ymax=res.popBbin[i];
+  }
+  const x2 = i => bx0 + (i/(bins-1))*(bx1-bx0);
+  const y2 = v => by1 - (v/ymax)*(by1-by0);
+
+  // draw lines
+  function drawLine(arr, color){
+    ctx.strokeStyle=color;
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    for(let i=0;i<bins;i++){
+      const px=x2(i), py=y2(arr[i]);
+      if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+    }
+    ctx.stroke();
+  }
+  drawLine(res.popEbin, "rgba(122,162,255,0.90)");
+  drawLine(res.popBbin, "rgba(255,204,102,0.90)");
+
+  // legend
+  ctx.fillStyle="rgba(159,176,192,0.85)";
+  ctx.font="12px ui-sans-serif, system-ui";
+  ctx.fillText(`Population spikes per ${res.bin_ms.toFixed(0)} ms bin`, bx0, by0-6);
+  ctx.fillStyle="rgba(122,162,255,0.90)";
+  ctx.fillRect(bx0+2, by0+6, 10, 3);
+  ctx.fillStyle="rgba(159,176,192,0.85)";
+  ctx.fillText("event coupling", bx0+18, by0+12);
+  ctx.fillStyle="rgba(255,204,102,0.90)";
+  ctx.fillRect(bx0+120, by0+6, 10, 3);
+  ctx.fillStyle="rgba(159,176,192,0.85)";
+  ctx.fillText("deprecated coupling", bx0+136, by0+12);
+
+  // x-axis label
+  ctx.fillStyle="rgba(159,176,192,0.75)";
+  ctx.fillText("time (s)", bx0 + (bx1-bx0)/2 - 22, H-6);
+}
+
+/* ---------------- Export ---------------- */
+function download(filename, text){
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob([text],{type:"application/json"}));
+  a.download=filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+function exportJSON(){
+  if(!lastResult){ setText("status","Run the simulation first."); return; }
+  // Keep export small: store pop bins, params, and spike counts (not full raster).
+  const steps=lastResult.steps, N=lastResult.meta.N;
+  let totalE=0,totalB=0;
+  for(let t=0;t<steps;t++){
+    const sE=lastResult.spikesE[t], sB=lastResult.spikesB[t];
+    for(let i=0;i<N;i++){ totalE+=sE[i]; totalB+=sB[i]; }
+  }
+  const payload = {
+    meta:lastResult.meta,
+    params:lastResult.params,
+    k:lastResult.k,
+    dt:lastResult.dt,
+    T:lastResult.T,
+    bin_ms:lastResult.bin_ms,
+    popEbin:Array.from(lastResult.popEbin),
+    popBbin:Array.from(lastResult.popBbin),
+    total_spikes:{event:totalE, deprecated:totalB}
+  };
+  download("nos_demo_B_export.json", JSON.stringify(payload, null, 2));
+  setText("status","Exported nos_demo_B_export.json");
+}
+
+/* ---------------- Wire UI ---------------- */
+for(const id of ["topology","N","kdeg","wmodel","seed","sym","normrho","k","tau0","T","dtms",
+                 "alpha","kappa","beta","lam","chi","gamma","a","b","mu","theta","rreset","creset","duspike","Ibase","noise","gv"]){
+  document.getElementById(id).addEventListener("input", ()=>{ updateDerived(); });
+  document.getElementById(id).addEventListener("change", ()=>{ updateDerived(); if(id==="topology" || id==="N" || id==="kdeg" || id==="wmodel" || id==="seed" || id==="sym" || id==="normrho" || id==="tau0" || id==="dtms") regenerateW(); });
+}
+
+document.getElementById("run").addEventListener("click", runSimulation);
+document.getElementById("regen").addEventListener("click", regenerateW);
+document.getElementById("export").addEventListener("click", exportJSON);
+
+updateDerived();
+regenerateW();
+</script>
+</body>
+</html>

@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>NOS Spiking Network Demo — Topology, margin, and v/u dynamics</title>
+<style>
+  :root{
+    --bg:#0b0f14; --card:#111823; --panel:#0f1620; --ink:#e6edf3; --muted:#9fb0c0; --line:#223044;
+    --accent:#7aa2ff; --ok:#7ee787; --warn:#ffcc66; --red:#ff6b6b; --vio:#b197fc;
+  }
+  *{box-sizing:border-box}
+  body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,sans-serif;background:var(--bg);margin:0;padding:20px;color:var(--ink)}
+  .container{max-width:1180px;margin:auto;background:var(--card);padding:20px;border-radius:14px;box-shadow:0 10px 34px rgba(0,0,0,.55)}
+  h1{text-align:center;color:var(--ink);margin:6px 0}
+  p.lead{text-align:center;color:var(--muted);margin:0 0 10px 0}
+  /* compact tile grid */
+  .controls{
+    display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; margin:10px 0; justify-content:start;
+  }
+  .control{background:var(--panel);border:1px solid var(--line);padding:8px 10px;border-radius:10px;min-width:0}
+  .control label{display:block;font-weight:600;font-size:11px;color:var(--ink);margin-bottom:4px}
+  .control .row{display:grid;grid-template-columns:1fr auto;align-items:center;column-gap:8px;min-width:0}
+  .control output{min-width:40px;text-align:right;font-variant-numeric:tabular-nums;color:var(--muted)}
+  .control select, .control input[type="number"]{
+    width:100%; padding:6px 8px; border-radius:9px; border:1px solid var(--line);
+    background:var(--panel); color:var(--ink); font-size:12px;
+  }
+  .buttons{display:flex;gap:10px;align-items:center;flex-wrap:wrap; margin-top:6px}
+  button,.checkbox{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:8px 12px;border-radius:10px;cursor:pointer}
+  button:hover{border-color:rgba(122,162,255,0.55)}
+  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px}
+  canvas{width:100%;height:280px;background:var(--panel);border:1px solid var(--line);border-radius:10px}
+  .legend{display:flex;justify-content:center;gap:18px;margin:6px 0 0;color:var(--muted);font-size:13px; flex-wrap:wrap}
+  .legend i{display:inline-block;width:14px;height:14px;border-radius:4px;margin-right:6px;vertical-align:-2px}
+  details{margin-top:10px;background:var(--panel);border:1px solid var(--line);padding:10px 12px;border-radius:10px}
+  .note{background:rgba(255,255,255,0.03);border:1px solid var(--line);padding:10px 12px;border-radius:10px;color:var(--ink);font-size:14px}
+  .foot{text-align:center;color:var(--muted);font-size:13px;margin-top:12px}
+  @media (max-width: 1050px){ .grid{grid-template-columns:1fr 1fr} }
+  @media (max-width: 720px){ .grid{grid-template-columns:1fr} }
+
+  /* Compact square sliders (thumb + track) */
+  .control .row input[type="range"]{-webkit-appearance:none;appearance:none;width:100%;height:24px;background:transparent;margin:0}
+  .control .row input[type="range"]::-webkit-slider-runnable-track{height:6px;background:var(--line);border-radius:4px}
+  .control .row input[type="range"]::-moz-range-track{height:6px;background:var(--line);border-radius:4px}
+  .control .row input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:12px;height:12px;background:rgba(230,237,243,0.55);border:1px solid rgba(159,176,192,0.55);border-radius:2px;margin-top:-3px;cursor:pointer}
+  .control .row input[type="range"]::-moz-range-thumb{width:12px;height:12px;background:rgba(230,237,243,0.55);border:1px solid rgba(159,176,192,0.55);border-radius:2px;cursor:pointer}
+  .control .row input[type="range"]:hover::-webkit-slider-thumb,
+  .control .row input[type="range"]:hover::-moz-range-thumb{background:rgba(230,237,243,0.85)}
+  .control .row input[type="range"]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .panelRow{display:grid;grid-template-columns:1fr 1fr; gap:10px; margin-top:8px}
+  @media (max-width: 900px){ .panelRow{grid-template-columns:1fr} }
+
+  .pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;border:1px solid var(--line);background:var(--panel)}
+  .pill.ok{border-color:rgba(126,231,135,0.35);color:var(--ok);background:rgba(126,231,135,0.10)}
+  .pill.bad{border-color:rgba(255,107,107,0.35);color:var(--red);background:rgba(255,107,107,0.10)}
+  .pill.warn{border-color:rgba(255,204,102,0.35);color:var(--warn);background:rgba(255,204,102,0.10)}
+  .kvl{font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>NOS Spiking Network Demo</h1>
+  <p class="lead"><strong>NOS</strong> with event-based coupling, topology control, and the operator margin <span class="kvl"><strong>g⋆ ≈ k⋆/ρ(W)</strong></span>.</p>
+
+  <!-- Controls -->
+  <div class="controls">
+    <div class="control">
+      <label for="topology">Topology preset</label>
+      <select id="topology">
+        <option value="ring">Ring</option>
+        <option value="chain">Chain</option>
+        <option value="star">Star</option>
+        <option value="er">Erdős–Rényi</option>
+        <option value="ba">Scale-free (BA)</option>
+        <option value="sw">Small-world (WS)</option>
+      </select>
+    </div>
+
+    <div class="control"><label for="N">Flows / nodes N</label><div class="row"><input type="range" id="N" min="10" max="160" step="1" value="80"><output id="o-N">80</output></div></div>
+    <div class="control"><label for="kdeg">Mean degree</label><div class="row"><input type="range" id="kdeg" min="2" max="30" step="1" value="6"><output id="o-kdeg">6</output></div></div>
+
+    <div class="control">
+      <label for="wmodel">Weights</label>
+      <select id="wmodel">
+        <option value="binary" selected>Binary</option>
+        <option value="uniform">Uniform [0,1]</option>
+        <option value="gauss">Gaussian |N(0,1)|</option>
+      </select>
+    </div>
+
+    <div class="control"><label for="seed">Seed</label><input type="number" id="seed" min="0" step="1" value="7"/></div>
+
+    <div class="control"><label><input type="checkbox" id="normrho" checked/> Normalise to ρ(W)=1</label></div>
+    <div class="control">
+      <label for="simw">Simulation coupling uses</label>
+      <select id="simw">
+        <option value="used" selected>W_used (normalised if enabled)</option>
+        <option value="raw">W_raw (show ρ(W) effect)</option>
+      </select>
+    </div>
+
+
+    <div class="control"><label for="focus">Focus node</label><div class="row"><input type="range" id="focus" min="0" max="79" step="1" value="0"><output id="o-focus">0</output></div></div>
+
+    <div class="control"><label for="rate">External arrival rate λ (spikes·s⁻¹)</label><div class="row"><input type="range" id="rate" min="0" max="300" step="1" value="60"><output id="o-rate">60</output></div></div>
+    <div class="control"><label for="Iamp">Arrival impulse amp</label><div class="row"><input type="range" id="Iamp" min="0" max="1.0" step="0.01" value="0.25"><output id="o-Iamp">0.25</output></div></div>
+
+    <div class="control"><label for="gc">Coupling gain g (event-based)</label><div class="row"><input type="range" id="gc" min="0" max="2.0" step="0.001" value="0.45"><output id="o-gc">0.450</output></div></div>
+    <div class="control"><label for="tau0">Delay τ₀ (ms)</label><div class="row"><input type="range" id="tau0" min="0" max="30" step="0.1" value="10.0"><output id="o-tau0">10.0</output></div></div>
+
+    <div class="control"><label for="theta">Threshold θ</label><div class="row"><input type="range" id="theta" min="0.3" max="2.0" step="0.05" value="1.0"><output id="o-theta">1.00</output></div></div>
+
+    <div class="control"><label for="lam">Service/drain λ (state leak)</label><div class="row"><input type="range" id="lam" min="0.1" max="6" step="0.1" value="1.0"><output id="o-lam">1.00</output></div></div>
+    <div class="control"><label for="beta">Linear gain β</label><div class="row"><input type="range" id="beta" min="0" max="3" step="0.05" value="0.6"><output id="o-beta">0.60</output></div></div>
+    <div class="control"><label for="alpha">Bounded gain α</label><div class="row"><input type="range" id="alpha" min="0" max="6" step="0.1" value="4.0"><output id="o-alpha">4.00</output></div></div>
+    <div class="control"><label for="kappa">Saturation κ</label><div class="row"><input type="range" id="kappa" min="0.05" max="4" step="0.05" value="0.8"><output id="o-kappa">0.80</output></div></div>
+
+    <div class="control"><label for="a">Recovery rate a</label><div class="row"><input type="range" id="a" min="0.1" max="12" step="0.1" value="3.0"><output id="o-a">3.00</output></div></div>
+    <div class="control"><label for="b">Coupling to recovery b</label><div class="row"><input type="range" id="b" min="0" max="1.0" step="0.01" value="0.15"><output id="o-b">0.15</output></div></div>
+
+    <div class="control"><label for="rv">Reset pullback ρ_reset</label><div class="row"><input type="range" id="rv" min="0" max="15" step="0.5" value="8.0"><output id="o-rv">8.0</output></div></div>
+    <div class="control"><label for="ru">Recovery kick Δu</label><div class="row"><input type="range" id="ru" min="0" max="15" step="0.5" value="5.0"><output id="o-ru">5.0</output></div></div>
+
+    <div class="control"><label for="vstar">Linearisation point v*</label><div class="row"><input type="range" id="vstar" min="0" max="1.0" step="0.01" value="0.20"><output id="o-vstar">0.20</output></div></div>
+  </div>
+
+  <div class="buttons">
+    <button class="primary" id="play">Pause</button>
+    <button id="step">Step 50 ms</button>
+    <button id="reset">Reset</button>
+    <button id="regen">Regenerate W</button>
+    <label class="checkbox"><input type="checkbox" id="nulls" checked> Show nullclines</label>
+    <label class="checkbox"><input type="checkbox" id="mascotOn" checked> Show mascot</label>
+    <button id="save">Save PNG</button>
+  </div>
+
+  <!-- Plots + Mascot -->
+  <div class="grid" style="margin-top:12px">
+    <div>
+      <canvas id="ts"></canvas>
+      <div class="legend">
+        <span><i style="background: var(--red)"></i>v (queue proxy)</span>
+        <span><i style="background: var(--accent)"></i>u (recovery)</span>
+        <span><i style="background: var(--ok)"></i>external arrivals</span>
+        <span><i style="background: var(--vio)"></i>incoming network spikes</span>
+        <span><i style="background: var(--warn)"></i>output spike</span>
+      </div>
+    </div>
+    <div>
+      <canvas id="ph"></canvas>
+      <div class="legend" style="justify-content:center"><span>Phase plane: v vs u (focus node)</span></div>
+    </div>
+    <div>
+      <canvas id="mascot"></canvas>
+      <div class="legend" style="justify-content:center"><span>Mascot: queue mood & packet bursts</span></div>
+    </div>
+
+
+
+  </div>
+
+  <div class="panelRow" style="margin-top:12px">
+    <div class="note" id="orPanel">
+          <div style="font-weight:700;margin-bottom:6px">Operator margin (topology → gain budget)</div>
+          <div>ρ(W)<sub>raw</sub> = <span class="kvl" id="rhoRaw">–</span>,  ρ(W)<sub id="rhoTag">used</sub> = <span class="kvl" id="rhoUsed">–</span></div>
+          <div>k⋆ (local bound, no delay) = <span class="kvl" id="kstar">–</span></div>
+          <div>g⋆ ≈ k⋆/ρ(W)<sub>raw</sub> = <span class="kvl" id="gstarRaw">–</span>  (paper-style)</div>
+          <div>Current: g = <span class="kvl" id="gcur">–</span>  ⇒  k = g·ρ(W)<sub id="rhoSimTag">sim</sub> = <span class="kvl" id="kcur">–</span></div>
+          <div style="margin-top:6px">Status: <span id="statusPill" class="pill warn">compute W</span> <span style="margin-left:8px;color:var(--muted);font-size:12px">(surrogate margin, not a hybrid reset proof)</span></div>
+        </div>
+
+    <div class="note" id="modelNote">
+          NOS drift: <span class="kvl">dv = f_sat(v) + (β − λ)v − u + I_ext + I_net</span>, <span class="kvl">du = a(bv − u)</span> (here μ=χ=γ=0).
+          Event at <span class="kvl">v_new ≥ θ</span> with pullback reset <span class="kvl">v ← c + (v−c)e^{−ρ_reset Δt}</span> and recovery kick <span class="kvl">u ← u + Δu</span>.
+          Coupling is event-based: <span class="kvl">I_net,i(t) = g·∑_j W_{ij} S_j(t−τ_{ij})</span>.<br/><span style="color:var(--muted);font-size:12px">Simulation uses <span class="kvl" id="simModeLabel">W_used</span> for W.</span>
+        </div>
+  </div>
+
+
+  <details>
+    <summary>What to look for</summary>
+    <div class="note">
+      If you raise the topology spectral radius ρ(W) (dense hub, scale-free), the gain budget <span class="kvl">g⋆ ≈ k⋆/ρ(W)</span> shrinks.
+      If you keep <span class="kvl">g</span> fixed and change topology, you should see transitions into oscillatory or bursty spiking, with v repeatedly hitting θ and u lagging.
+      Normalising to ρ(W)=1 makes topologies comparable under the same g in simulation, while still reporting the raw ρ(W) for the margin formula.
+    </div>
+  </details>
+
+  <p class="foot">All coupling in this demo is event-based (spikes), never “coupling through nonlinearity”.</p>
+</div>
+
+<script>
+/* ---------- Canvas helpers ---------- */
+function setupCanvas(canvas){
+  const ratio = Math.max(1, window.devicePixelRatio || 1);
+  const rect = canvas.getBoundingClientRect();
+  canvas.width = Math.round(rect.width * ratio);
+  canvas.height = Math.round(rect.height * ratio);
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(ratio,0,0,ratio,0,0);
+  return ctx;
+}
+const el = id => document.getElementById(id);
+
+/* ---------- UI wiring ---------- */
+const sliderIds=["N","kdeg","focus","rate","Iamp","gc","tau0","theta","lam","beta","alpha","kappa","a","b","rv","ru","vstar"];
+const sliderFmt = {
+  N:v=>v.toFixed(0), kdeg:v=>v.toFixed(0), focus:v=>v.toFixed(0), rate:v=>v.toFixed(0),
+  Iamp:v=>v.toFixed(2), gc:v=>v.toFixed(3), tau0:v=>v.toFixed(1), theta:v=>v.toFixed(2),
+  lam:v=>v.toFixed(2), beta:v=>v.toFixed(2), alpha:v=>v.toFixed(2), kappa:v=>v.toFixed(2),
+  a:v=>v.toFixed(2), b:v=>v.toFixed(2), rv:v=>v.toFixed(1), ru:v=>v.toFixed(1), vstar:v=>v.toFixed(2)
+};
+function syncOutputs(){
+  for(const id of sliderIds){
+    const o = el("o-"+id);
+    if(!o) continue;
+    const v = parseFloat(el(id).value);
+    o.textContent = (sliderFmt[id]||((x)=>String(x)))(v);
+  }
+}
+
+/* ---------- RNG ---------- */
+function mulberry32(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function randnAbs(rng){
+  let u = 1e-12 + rng(), v = 1e-12 + rng();
+  let z = Math.sqrt(-2.0*Math.log(u))*Math.cos(2.0*Math.PI*v);
+  return Math.abs(z);
+}
+
+/* ---------- Graph builder (adjacency lists) ---------- */
+function weightSample(rng, model){
+  if(model==="binary") return 1.0;
+  if(model==="uniform") return rng();
+  return randnAbs(rng);
+}
+function addEdge(edges, i, j, w){
+  if(i===j) return;
+  edges.push([i,j,w]);
+}
+function buildEdges(topo, N, kdeg, rng, wmodel){
+  const edges=[];
+  const k = Math.max(2, kdeg|0);
+  const half = Math.floor(k/2);
+
+  if(topo==="chain"){
+    for(let i=0;i<N-1;i++){
+      const w = weightSample(rng,wmodel);
+      addEdge(edges,i,i+1,w); addEdge(edges,i+1,i,w);
+    }
+    return edges;
+  }
+  if(topo==="star"){
+    for(let i=1;i<N;i++){
+      const w = weightSample(rng,wmodel);
+      addEdge(edges,0,i,w); addEdge(edges,i,0,w);
+    }
+    return edges;
+  }
+  if(topo==="ring"){
+    for(let i=0;i<N;i++){
+      for(let d=1; d<=half; d++){
+        const j = (i+d)%N;
+        const w = weightSample(rng,wmodel);
+        addEdge(edges,i,j,w); addEdge(edges,j,i,w);
+      }
+    }
+    return edges;
+  }
+  if(topo==="er"){
+    const p = Math.min(1.0, Math.max(0.0, k/(N-1)));
+    for(let i=0;i<N;i++){
+      for(let j=i+1;j<N;j++){
+        if(rng()<p){
+          const w=weightSample(rng,wmodel);
+          addEdge(edges,i,j,w); addEdge(edges,j,i,w);
+        }
+      }
+    }
+    return edges;
+  }
+  if(topo==="sw"){
+    const pRewire=0.10;
+    // start ring
+    const seen=new Set();
+    for(let i=0;i<N;i++){
+      for(let d=1; d<=half; d++){
+        let j = (i+d)%N;
+        if(rng()<pRewire){
+          let cand = Math.floor(rng()*N);
+          while(cand===i) cand = Math.floor(rng()*N);
+          j=cand;
+        }
+        const key = i<j ? (i<<20)+j : (j<<20)+i;
+        if(seen.has(key)) continue;
+        seen.add(key);
+        const w=weightSample(rng,wmodel);
+        addEdge(edges,i,j,w); addEdge(edges,j,i,w);
+      }
+    }
+    return edges;
+  }
+  // BA
+  const m = Math.max(1, Math.floor(k/2));
+  const m0 = Math.max(m+1, 4);
+  const deg = new Float64Array(N);
+  for(let i=0;i<m0;i++){
+    for(let j=i+1;j<m0;j++){
+      const w=weightSample(rng,wmodel);
+      addEdge(edges,i,j,w); addEdge(edges,j,i,w);
+      deg[i]++; deg[j]++;
+    }
+  }
+  let sumDeg=0; for(let i=0;i<m0;i++) sumDeg += deg[i];
+  for(let node=m0; node<N; node++){
+    const targets=new Set();
+    while(targets.size < m){
+      const r = rng()*sumDeg;
+      let acc=0, pick=0;
+      for(let i=0;i<node;i++){ acc += deg[i]; if(acc>=r){ pick=i; break; } }
+      targets.add(pick);
+    }
+    for(const t of targets){
+      const w=weightSample(rng,wmodel);
+      addEdge(edges,node,t,w); addEdge(edges,t,node,w);
+      deg[node]++; deg[t]++; sumDeg += 2;
+    }
+  }
+  return edges;
+}
+
+/* Build incoming adjacency with delay steps */
+function buildAdjIn(N, edges, dt, tau0_ms, rng, delaysOpt){
+  const dt_ms = dt*1000.0;
+  // small jitter so arrivals are not perfectly synchronous
+  const tau0 = Math.max(0, tau0_ms);
+  const inSrc = new Array(N), inW = new Array(N), inD = new Array(N);
+  for(let i=0;i<N;i++){ inSrc[i]=[]; inW[i]=[]; inD[i]=[]; }
+
+  const delays = new Int32Array(edges.length);
+  let maxD=0;
+
+  for(let ei=0; ei<edges.length; ei++){
+    const e = edges[ei];
+    const src = e[0], dst = e[1], w = e[2];
+
+    let d;
+    if(delaysOpt){
+      d = delaysOpt[ei] | 0;
+    }else{
+      const jitter = (rng()*2-1) * 0.25 * tau0;
+      const tau = Math.max(0, tau0 + jitter);
+      d = Math.max(1, Math.round(tau/dt_ms)); // enforce >=1 step to avoid stale reads when τ≈0
+    }
+    delays[ei] = d;
+
+    inSrc[dst].push(src);
+    inW[dst].push(w);
+    inD[dst].push(d);
+    if(d>maxD) maxD=d;
+  }
+
+  // pack into typed arrays
+  const adj = new Array(N);
+  for(let i=0;i<N;i++){
+    adj[i]={
+      src: Int32Array.from(inSrc[i]),
+      w: Float64Array.from(inW[i]),
+      d: Int32Array.from(inD[i])
+    };
+  }
+  return {adj:adj, maxD:maxD, delays:delays}
+}
+
+/* Power iteration spectral radius for nonnegative adjacency */
+function spectralRadius(N, edges, iters=70){
+  if(edges.length===0) return 0;
+  let x = new Float64Array(N);
+  for(let i=0;i<N;i++) x[i]=1.0/N;
+  let y = new Float64Array(N);
+  let lam = 0;
+
+  for(let t=0;t<iters;t++){
+    y.fill(0);
+    for(const [src,dst,w] of edges) y[dst] += w*x[src];
+    // normalise
+    let n2=0; for(let i=0;i<N;i++) n2 += y[i]*y[i];
+    n2 = Math.sqrt(n2);
+    if(n2===0) return 0;
+    for(let i=0;i<N;i++) x[i] = y[i]/n2;
+    // Rayleigh-like
+    y.fill(0);
+    for(const [src,dst,w] of edges) y[dst] += w*x[src];
+    let num=0; for(let i=0;i<N;i++) num += x[i]*y[i];
+    lam = Math.abs(num);
+  }
+  return lam;
+}
+
+/* ---------- NOS functions ---------- */
+function f_sat(v, alpha, kappa){
+  const den = 1.0 + kappa*v*v;
+  return alpha * (v*v) / den;
+}
+function fprime_sat(v, alpha, kappa){
+  const den = 1.0 + kappa*v*v;
+  return (2.0*alpha*v) / (den*den);
+}
+function k_star_local_bound(vstar, alpha, kappa, beta, lam, a, b){
+  // mu=0, chi=0: dbar = f'(v*) + (beta - lam)
+  const dbar = fprime_sat(vstar, alpha, kappa) + (beta - lam);
+  const C_det = b - dbar;        // (a*b)/(a+0) - dbar
+  const C_tr  = a - dbar;        // (a+0) - dbar
+  return {kstar: Math.min(C_det, C_tr), dbar:dbar};
+}
+
+/* ---------- Canvases ---------- */
+const ts=el('ts'), ph=el('ph'), mc=el('mascot');
+let tsCtx=setupCanvas(ts), phCtx=setupCanvas(ph), mcCtx=setupCanvas(mc);
+window.addEventListener('resize',()=>{ tsCtx=setupCanvas(ts); phCtx=setupCanvas(ph); mcCtx=setupCanvas(mc); drawTimeSeries(); drawPhase(); drawMascot(); });
+
+/* ---------- Simulation state ---------- */
+let running=true;
+let t=0;
+const dt=0.0015;              // 1.5 ms
+const span=6.0;
+const c_reset=0.25;           // reset centre (v)
+const du_unit=0.18;           // scales ru into Δu
+const rho_unit=200.0;         // scales rv into ρ_reset
+let vArr=null, uArr=null, IextBuf=null;
+
+let edgesRaw=null, edgesUsed=null, adjInUsed=null, adjInRaw=null, maxD=0, rhoRaw=0.0, rhoUsed=0.0, scaleUsed=1.0;
+let spikeBuf=null, bufLen=1, stepIdx=0;
+
+const hist={t:[],v:[],u:[],arrivals:[],incoming:[],spikes:[], t0:0, a0:0, i0:0, s0:0};
+const packets=[]; // mascot confetti
+
+function params(){
+  return {
+    topology: el("topology").value,
+    N: parseInt(el("N").value,10),
+    kdeg: parseInt(el("kdeg").value,10),
+    wmodel: el("wmodel").value,
+    seed: parseInt(el("seed").value,10),
+    normrho: el("normrho").checked,
+        simw: el("simw").value,
+focus: parseInt(el("focus").value,10),
+    rate: parseFloat(el("rate").value),
+    Iamp: parseFloat(el("Iamp").value),
+    gc: parseFloat(el("gc").value),
+    tau0: parseFloat(el("tau0").value),
+    theta: parseFloat(el("theta").value),
+    lam: parseFloat(el("lam").value),
+    beta: parseFloat(el("beta").value),
+    alpha: parseFloat(el("alpha").value),
+    kappa: parseFloat(el("kappa").value),
+    a: parseFloat(el("a").value),
+    b: parseFloat(el("b").value),
+    rv: parseFloat(el("rv").value),
+    ru: parseFloat(el("ru").value),
+    vstar: parseFloat(el("vstar").value)
+  };
+}
+
+function setPill(kind, text){
+  const pill = el("statusPill");
+  pill.className = "pill " + kind;
+  pill.textContent = text;
+}
+
+function updateORPanel(){
+  const p=params();
+  // local bound
+  const kb = k_star_local_bound(p.vstar, p.alpha, p.kappa, p.beta, p.lam, p.a, p.b);
+  const kstar = kb.kstar;
+
+  el("rhoRaw").textContent = (isFinite(rhoRaw) ? rhoRaw.toFixed(4) : "–");
+  el("rhoUsed").textContent = (isFinite(rhoUsed) ? rhoUsed.toFixed(4) : "–");
+  el("kstar").textContent = (isFinite(kstar) ? kstar.toFixed(4) : "–");
+
+  const gstarRaw = (rhoRaw>0 && isFinite(kstar)) ? (kstar/rhoRaw) : NaN;
+  el("gstarRaw").textContent = (isFinite(gstarRaw) ? gstarRaw.toFixed(4) : "–");
+
+  el("gcur").textContent = p.gc.toFixed(4);
+  const rhoSim = (p.simw==="raw" ? rhoRaw : rhoUsed);
+  const tag = el("rhoSimTag"); if(tag) tag.textContent = (p.simw==="raw" ? "raw" : "used");
+  const sm = el("simModeLabel"); if(sm) sm.textContent = (p.simw==="raw" ? "W_raw" : "W_used");
+  const kcur = p.gc * rhoSim;
+  el("kcur").textContent = (isFinite(kcur) ? kcur.toFixed(4) : "–");
+
+  if(!isFinite(kstar) || kstar<=0){
+    setPill("bad", "unstable (k⋆ ≤ 0)");
+  }else if(!isFinite(rhoSim) || rhoSim<=0){
+    setPill("warn", "ρ(W)=0");
+  }else{
+    const ok = (kcur < kstar);
+    setPill(ok ? "ok" : "bad", ok ? "within margin" : "beyond margin");
+  }
+}
+
+/* ---------- Build / rebuild W ---------- */
+function rebuildNetwork(){
+  const p=params();
+  // update focus slider max
+  el("focus").max = String(Math.max(0, p.N-1));
+  if(p.focus > p.N-1){ el("focus").value = String(p.N-1); }
+  syncOutputs();
+
+  const rng = mulberry32((p.seed + 10007) ^ (p.N*2654435761));
+  edgesRaw = buildEdges(p.topology, p.N, p.kdeg, rng, p.wmodel);
+  rhoRaw = spectralRadius(p.N, edgesRaw, 80);
+
+  edgesUsed = edgesRaw;
+  rhoUsed = rhoRaw;
+  scaleUsed = 1.0;
+
+  if(p.normrho && rhoRaw>0){
+    scaleUsed = 1.0/rhoRaw;
+    edgesUsed = edgesRaw.map(e => [e[0], e[1], e[2]*scaleUsed]);
+    rhoUsed = spectralRadius(p.N, edgesUsed, 80);
+  }
+
+  // build adjacency + delays
+  const rng2 = mulberry32(((p.seed + 33133) ^ (p.kdeg*97531))>>>0);
+  const builtUsed = buildAdjIn(p.N, edgesUsed, dt, p.tau0, rng2);
+  const builtRaw  = buildAdjIn(p.N, edgesRaw,  dt, p.tau0, rng2, builtUsed.delays);
+  adjInUsed = builtUsed.adj;
+  adjInRaw  = builtRaw.adj;
+  maxD = builtUsed.maxD;
+
+  bufLen = Math.max(1, maxD+1);
+  spikeBuf = new Array(bufLen);
+  for(let i=0;i<bufLen;i++) spikeBuf[i] = new Uint8Array(p.N);
+  stepIdx = 0;
+
+  // init state
+  vArr = new Float64Array(p.N);
+  uArr = new Float64Array(p.N);
+  for(let i=0;i<p.N;i++){
+    vArr[i] = 0.05 + 0.08*(rng()*2-1);
+    uArr[i] = 0.0;
+  }
+
+  // clear history
+  t=0;
+  hist.t=[]; hist.v=[]; hist.u=[]; hist.arrivals=[]; hist.incoming=[]; hist.spikes=[];
+  hist.t0=0; hist.a0=0; hist.i0=0; hist.s0=0;
+  packets.length=0;
+
+  // reusable buffers (avoid per-step allocations)
+  IextBuf = new Float64Array(p.N);
+
+  updateORPanel();
+  drawTimeSeries(); drawPhase(); drawMascot();
+}
+
+/* ---------- Simulation step ---------- */
+function stepOnce(runtimeMs){
+  if(!vArr) rebuildNetwork();
+  const p=params();
+
+  // IMPORTANT: while the user drags the N slider, params().N changes immediately.
+  // The simulation state (vArr/uArr/adjacency) only changes on rebuildNetwork().
+  // Use the current state size so the sim never crashes or "halts".
+  const N = vArr.length;
+  const focus = Math.max(0, Math.min(N-1, (p.focus|0)));
+
+  const steps = Math.max(1, Math.floor((runtimeMs||0)/(dt*1000)));
+  if(!IextBuf || IextBuf.length!==N) IextBuf = new Float64Array(N);
+
+  for(let n=0;n<steps;n++){
+    t += dt;
+
+    // write spikes directly into the ring-buffer slot for this step
+    const spikesNow = spikeBuf[stepIdx % bufLen];
+    spikesNow.fill(0);
+
+    // external arrivals (Bernoulli per dt)
+    IextBuf.fill(0);
+    const pr = Math.min(1.0, Math.max(0.0, p.rate*dt));
+    for(let i=0;i<N;i++){
+      if(Math.random() < pr){
+        IextBuf[i] = p.Iamp;
+        if(i===focus) hist.arrivals.push(t);
+      }
+    }
+
+    // incoming coupling for focus (for display)
+    let incomingCountFocus = 0;
+
+    // update all nodes (Euler, then event reset)
+    for(let i=0;i<N;i++){
+      const adj = (p.simw==="raw" ? adjInRaw[i] : adjInUsed[i]);
+      if(!adj) continue; // safety (should not happen)
+
+      const src = adj.src, w = adj.w, d = adj.d;
+      let acc = 0.0;
+
+      for(let k=0;k<src.length;k++){
+        const idx = (stepIdx - d[k]);
+        const buf = spikeBuf[((idx%bufLen)+bufLen)%bufLen];
+        const sj = buf[src[k]];
+        if(sj){
+          acc += w[k];
+          if(i===focus) incomingCountFocus++;
+        }
+      }
+
+      const Inet = p.gc * acc;
+      const dv = f_sat(vArr[i], p.alpha, p.kappa) + (p.beta - p.lam)*vArr[i] - uArr[i] + IextBuf[i] + Inet;
+      const du = p.a*(p.b*vArr[i] - uArr[i]);
+
+      let vNew = vArr[i] + dt*dv;
+      let uNew = uArr[i] + dt*du;
+
+      if(vNew >= p.theta){
+        spikesNow[i] = 1;
+        if(i===focus) hist.spikes.push(t);
+
+        // pullback reset (training-friendly surrogate)
+        const rho_reset = rho_unit * p.rv;
+        const pull = Math.exp(-rho_reset * dt);
+        vNew = c_reset + (vNew - c_reset)*pull;
+        uNew = uNew + du_unit * p.ru;
+
+        if(i===focus) spawnPackets();
+      }
+
+      vArr[i] = Math.max(0, vNew);
+      uArr[i] = Math.max(0, uNew);
+    }
+
+    if(incomingCountFocus>0) hist.incoming.push(t);
+
+    stepIdx++;
+
+    // record focus trajectory
+    hist.t.push(t);
+    hist.v.push(vArr[focus]);
+    hist.u.push(uArr[focus]);
+
+    // maintain a rolling window without O(n) Array.shift()
+    const tMin = Math.max(0, t - span);
+    while(hist.t0 < hist.t.length && hist.t[hist.t0] < tMin){ hist.t0++; }
+    while(hist.a0 < hist.arrivals.length && hist.arrivals[hist.a0] < tMin) hist.a0++;
+    while(hist.i0 < hist.incoming.length && hist.incoming[hist.i0] < tMin) hist.i0++;
+    while(hist.s0 < hist.spikes.length && hist.spikes[hist.s0] < tMin) hist.s0++;
+
+    // occasional compaction
+    if(hist.t0 > 2500){
+      hist.t = hist.t.slice(hist.t0);
+      hist.v = hist.v.slice(hist.t0);
+      hist.u = hist.u.slice(hist.t0);
+      hist.t0 = 0;
+    }
+    if(hist.a0 > 400){ hist.arrivals = hist.arrivals.slice(hist.a0); hist.a0 = 0; }
+    if(hist.i0 > 400){ hist.incoming = hist.incoming.slice(hist.i0); hist.i0 = 0; }
+    if(hist.s0 > 400){ hist.spikes = hist.spikes.slice(hist.s0); hist.s0 = 0; }
+
+    // advance mascot packet sprites
+    for(const P of packets){ P.x += P.vx; P.y += P.vy; P.vy += 0.12; P.life -= 1; }
+    for(let i=packets.length-1;i>=0;i--) if(packets[i].life<=0) packets.splice(i,1);
+  }
+}
+
+
+/* ---------- Packet confetti for mascot ---------- */
+function spawnPackets(){
+  const W=mc.getBoundingClientRect().width, H=mc.getBoundingClientRect().height;
+  const origin={x:W*0.72,y:H*0.58}; // from mouth
+  for(let i=0;i<14;i++){
+    const ang = (-Math.PI/6) + Math.random()*(-Math.PI/2);
+    const spd = 3 + Math.random()*3;
+    packets.push({x:origin.x, y:origin.y, vx:spd*Math.cos(ang), vy:spd*Math.sin(ang), life: 40+Math.random()*20});
+  }
+}
+
+/* ---------- Drawing ---------- */
+function axis(ctx,x0,y0,x1,y1){ ctx.beginPath(); ctx.moveTo(x0,y0); ctx.lineTo(x1,y1); ctx.stroke(); }
+
+function drawTimeSeries(){
+  const W=ts.getBoundingClientRect().width, H=ts.getBoundingClientRect().height;
+  tsCtx.clearRect(0,0,W,H);
+  const padL=42,padB=26,padT=12,padR=12;
+  const p=params();
+  const tMin=Math.max(0,t-span);
+
+  tsCtx.strokeStyle='#cbd5e1'; tsCtx.lineWidth=1;
+  axis(tsCtx,padL,padT,padL,H-padB); axis(tsCtx,padL,H-padB,W-padR,H-padB);
+  tsCtx.fillStyle='#334155'; tsCtx.font='12px system-ui'; tsCtx.fillText('time (s)', W/2-28, H-6);
+
+  const X=tt=>padL+(tt-tMin)/span*(W-padL-padR);
+  const Y=v=>H-padB - Math.min(1, v/3)*(H-padB-padT);
+
+  const start = Math.min(hist.t.length, Math.max(0, hist.t0|0));
+
+  tsCtx.strokeStyle='#ef4444'; tsCtx.lineWidth=2; tsCtx.beginPath();
+  for(let i=start;i<hist.t.length;i++){ const px=X(hist.t[i]), py=Y(hist.v[i]); if(i===start) tsCtx.moveTo(px,py); else tsCtx.lineTo(px,py); }
+  tsCtx.stroke();
+
+  tsCtx.strokeStyle='#3b82f6'; tsCtx.lineWidth=2; tsCtx.beginPath();
+  for(let i=start;i<hist.t.length;i++){ const px=X(hist.t[i]), py=Y(hist.u[i]); if(i===start) tsCtx.moveTo(px,py); else tsCtx.lineTo(px,py); }
+  tsCtx.stroke();
+
+  // arrival ticks
+  tsCtx.fillStyle='#16a34a';
+  for(let i=hist.a0;i<hist.arrivals.length;i++){ const ti=hist.arrivals[i]; const px=X(ti); tsCtx.fillRect(px-1,H-padB,2,-14); }
+
+  // incoming coupling ticks
+  tsCtx.fillStyle='#8b5cf6';
+  for(let i=hist.i0;i<hist.incoming.length;i++){ const ti=hist.incoming[i]; const px=X(ti); tsCtx.fillRect(px-1,H-padB,2,-22); }
+
+  // output spikes
+  tsCtx.fillStyle='#f59e0b';
+  for(let i=hist.s0;i<hist.spikes.length;i++){ const tt=hist.spikes[i]; const px=X(tt); tsCtx.beginPath(); tsCtx.arc(px,H-padB-8,4.5,0,2*Math.PI); tsCtx.fill(); }
+
+  // threshold
+  tsCtx.save(); tsCtx.setLineDash([5,4]); tsCtx.strokeStyle='#f59e0b';
+  tsCtx.beginPath(); const ty=Y(p.theta); tsCtx.moveTo(padL,ty); tsCtx.lineTo(W-padR,ty); tsCtx.stroke(); tsCtx.restore();
+}
+
+function drawPhase(){
+  const W=ph.getBoundingClientRect().width, H=ph.getBoundingClientRect().height;
+  phCtx.clearRect(0,0,W,H);
+  const pad=46,min=0,max=3;
+  const X=v=>pad+(Math.min(max,v)-min)/(max-min)*(W-2*pad);
+  const Y=v=>H-pad-(Math.min(max,v)-min)/(max-min)*(H-2*pad);
+
+  phCtx.strokeStyle='#e5e7eb'; phCtx.lineWidth=1;
+  for(let i=0;i<=3;i++){
+    const xx=pad + i*(W-2*pad)/3, yy=pad + i*(H-2*pad)/3;
+    phCtx.beginPath(); phCtx.moveTo(xx,pad); phCtx.lineTo(xx,H-pad); phCtx.stroke();
+    phCtx.beginPath(); phCtx.moveTo(pad,yy); phCtx.lineTo(W-pad,yy); phCtx.stroke();
+  }
+  phCtx.strokeStyle='#94a3b8'; phCtx.lineWidth=1.5; axis(phCtx,pad,H-pad,pad,pad); axis(phCtx,pad,pad,W-pad,pad);
+  phCtx.fillStyle='#334155'; phCtx.font='12px system-ui';
+  phCtx.fillText('v', W-pad+6, pad+4); phCtx.fillText('u', pad-16, pad-8);
+
+  const p=params();
+
+  if(el("nulls").checked){
+    phCtx.save(); phCtx.strokeStyle='#94a3b8'; phCtx.setLineDash([4,3]); phCtx.lineWidth=1.5;
+    // u = b v (mu=0)
+    phCtx.beginPath(); phCtx.moveTo(X(0),Y(0)); phCtx.lineTo(X(3),Y(3*p.b)); phCtx.stroke();
+    // u = f_sat(v) + (beta - lam) v  (I=0)
+    phCtx.beginPath();
+    for(let i=0;i<=300;i++){
+      const vv = 3*i/300;
+      const uu = Math.max(0, f_sat(vv,p.alpha,p.kappa) + (p.beta - p.lam)*vv );
+      const px=X(vv), py=Y(uu);
+      if(i===0) phCtx.moveTo(px,py); else phCtx.lineTo(px,py);
+    }
+    phCtx.stroke();
+    phCtx.restore();
+  }
+
+  // trajectory
+  phCtx.strokeStyle='#8b5cf6'; phCtx.lineWidth=2;
+  const Np=hist.t.length; const start=Math.max(0,Np-500);
+  phCtx.beginPath();
+  for(let i=start;i<Np;i++){
+    const px=X(hist.v[i]); const py=Y(hist.u[i]);
+    if(i===start) phCtx.moveTo(px,py); else phCtx.lineTo(px,py);
+  }
+  phCtx.stroke();
+
+  // current point
+  if(Np>0){
+    phCtx.fillStyle='#ef4444'; phCtx.beginPath();
+    phCtx.arc(X(hist.v[Np-1]), Y(hist.u[Np-1]), 5.5, 0, 2*Math.PI);
+    phCtx.fill();
+  }
+
+  // threshold line in v
+  phCtx.save(); phCtx.setLineDash([5,4]); phCtx.strokeStyle='#f59e0b';
+  phCtx.beginPath(); phCtx.moveTo(X(p.theta), pad); phCtx.lineTo(X(p.theta), H-pad); phCtx.stroke(); phCtx.restore();
+}
+
+/* ---------- Mascot panel ---------- */
+function drawMascot(){
+  const W=mc.getBoundingClientRect().width, H=mc.getBoundingClientRect().height;
+  mcCtx.clearRect(0,0,W,H);
+
+  if(!el("mascotOn").checked){
+    mcCtx.fillStyle='#94a3b8'; mcCtx.font='14px system-ui'; mcCtx.fillText('Mascot hidden', 14, 24); return;
+  }
+
+  // Background grid
+  mcCtx.strokeStyle='#e5e7eb'; mcCtx.lineWidth=1;
+  for(let i=0;i<5;i++){ const yy = 20+i*(H-40)/4; mcCtx.beginPath(); mcCtx.moveTo(20,yy); mcCtx.lineTo(W-20,yy); mcCtx.stroke(); }
+
+  // Queue tank (left)
+  const tank={x:36,y:28,w:44,h:H-56,r:8};
+  mcCtx.fillStyle='#e5e7eb'; mcCtx.strokeStyle='#94a3b8';
+  mcCtx.beginPath(); mcCtx.moveTo(tank.x, tank.y);
+  mcCtx.roundRect?.(tank.x,tank.y,tank.w,tank.h,tank.r);
+  if(!mcCtx.roundRect){ mcCtx.rect(tank.x,tank.y,tank.w,tank.h); }
+  mcCtx.fill(); mcCtx.stroke();
+
+  const p=params();
+  const focus = p.focus;
+  const v = (vArr && focus < vArr.length) ? vArr[focus] : 0.0;
+  const u = (uArr && focus < uArr.length) ? uArr[focus] : 0.0;
+
+  // Fill level proportional to v
+  const level=Math.max(0, Math.min(1.2, v/1.2));
+  const fillH = (tank.h-8) * level;
+  const fillY = tank.y + tank.h - 4 - fillH;
+  const col = level<0.6 ? '#10b981' : level<0.9 ? '#f59e0b' : '#ef4444';
+  mcCtx.fillStyle=col;
+  mcCtx.fillRect(tank.x+4, fillY, tank.w-8, fillH);
+
+  // Face bot (right)
+  const cx=W*0.70, cy=H*0.55, faceR=52;
+  const mood = Math.max(0, Math.min(1, (v - p.theta + 0.4)/1.4));
+  const faceCol = mood<0.5 ? '#e0f2fe' : mood<0.8 ? '#fee2e2' : '#fecaca';
+  mcCtx.fillStyle=faceCol; mcCtx.strokeStyle='#94a3b8';
+  mcCtx.lineWidth=2; mcCtx.beginPath(); mcCtx.arc(cx,cy,faceR,0,Math.PI*2); mcCtx.fill(); mcCtx.stroke();
+
+  // eyes blink and squint with u
+  const blink = (Math.sin(t*2)+1)/2;
+  const eyeOpen = 1 - 0.75*blink;
+  const squint = Math.min(0.6, u/4);
+  const eyeY = cy - 12;
+  const ex = 16, eyH = Math.max(2, 7*eyeOpen*(1-squint));
+  mcCtx.fillStyle='#1f2937';
+  mcCtx.fillRect(cx-ex-6, eyeY - eyH/2, 12, eyH);
+  mcCtx.fillRect(cx+ex-6, eyeY - eyH/2, 12, eyH);
+
+  // mouth based on v relative to theta
+  const gap = v - p.theta;
+  mcCtx.strokeStyle='#1f2937'; mcCtx.lineWidth=3; mcCtx.beginPath();
+  const my=cy+16;
+  if(gap < -0.1){
+    mcCtx.arc(cx,my,18,Math.PI*0.15,Math.PI- Math.PI*0.15,false);
+  } else if (gap < 0.1){
+    mcCtx.moveTo(cx-16,my); mcCtx.lineTo(cx+16,my);
+  } else {
+    mcCtx.arc(cx,my+8,18,Math.PI*1.05,Math.PI*1.95,true);
+  }
+  mcCtx.stroke();
+
+  // packets
+  for(const P of packets){
+    mcCtx.fillStyle = '#3b82f6';
+    mcCtx.beginPath(); mcCtx.arc(P.x,P.y,3,0,2*Math.PI); mcCtx.fill();
+  }
+
+  mcCtx.fillStyle='#334155'; mcCtx.font='12px system-ui';
+  mcCtx.fillText(`v = ${v.toFixed(2)}  |  u = ${u.toFixed(2)}  |  θ = ${p.theta.toFixed(2)}`, 20, H-12);
+}
+
+/* ---------- Controls / loop ---------- */
+function drawAll(){ drawTimeSeries(); drawPhase(); drawMascot(); }
+
+const playBtn=el('play'), stepBtn=el('step'), resetBtn=el('reset'), saveBtn=el('save'), regenBtn=el('regen');
+
+playBtn.addEventListener('click',()=>{ running=!running; playBtn.textContent=running?'Pause':'Play'; });
+stepBtn.addEventListener('click',()=>{ stepOnce(50); updateORPanel(); drawAll(); });
+resetBtn.addEventListener('click',()=>{ rebuildNetwork(); setPill("warn","reset"); });
+regenBtn.addEventListener('click',()=>{ rebuildNetwork(); setPill("warn","W regenerated"); });
+
+for(const id of sliderIds){
+  el(id).addEventListener('input',()=>{
+    syncOutputs();
+    if(["gc","rate","Iamp","theta","lam","beta","alpha","kappa","a","b","rv","ru","vstar","focus"].includes(id)){
+      updateORPanel();
+      drawAll();
+    }
+  });
+}
+for(const id of ["topology","wmodel","seed","normrho"]){
+  el(id).addEventListener('change',()=>{ rebuildNetwork(); });
+}
+el("tau0").addEventListener('input',()=>{ syncOutputs(); /* delay changes need rebuild */ });
+el("tau0").addEventListener('change',()=>{ rebuildNetwork(); });
+
+el("N").addEventListener('change',()=>{ rebuildNetwork(); });
+el("kdeg").addEventListener('change',()=>{ rebuildNetwork(); });
+
+el("nulls").addEventListener('change', drawAll);
+el("mascotOn").addEventListener('change', drawAll);
+
+saveBtn.addEventListener('click',()=>{
+  const ratio=Math.max(1,window.devicePixelRatio||1);
+  const W0=ts.getBoundingClientRect().width, W1=ph.getBoundingClientRect().width, W2=mc.getBoundingClientRect().width;
+  const H0=Math.max(ts.getBoundingClientRect().height, ph.getBoundingClientRect().height, mc.getBoundingClientRect().height);
+  const W=W0+W1+W2+30;
+  const c=document.createElement('canvas'); c.width=Math.round(W*ratio); c.height=Math.round(H0*ratio);
+  const ctx=c.getContext('2d'); ctx.setTransform(ratio,0,0,ratio,0,0); ctx.fillStyle='#ffffff'; ctx.fillRect(0,0,W,H0);
+  ctx.drawImage(ts,0,0); ctx.drawImage(ph,W0+10,0); ctx.drawImage(mc,W0+W1+20,0);
+  const link=document.createElement('a'); link.download=`nos_topology_margin_${Date.now()}.png`; link.href=c.toDataURL('image/png'); link.click();
+});
+
+/* animation loop */
+let lastTs=performance.now();
+function loop(now){
+  const elapsed=now-lastTs; lastTs=now;
+  if(running){
+    stepOnce(elapsed);
+  }
+  updateORPanel();
+  drawAll();
+  requestAnimationFrame(loop);
+}
+
+syncOutputs();
+rebuildNetwork();
+requestAnimationFrame(ts0=>{ lastTs=ts0; loop(ts0); });
+</script>
+</body>
+</html>

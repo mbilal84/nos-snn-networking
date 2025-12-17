@@ -1,0 +1,781 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NOS Topology–Margin Demo (k* ≈ const / ρ(W))</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#111823; --panel2:#0f1620; --fg:#e6edf3; --muted:#9fb0c0;
+    --accent:#7aa2ff; --warn:#ffcc66; --bad:#ff6b6b; --good:#7ee787; --line:#223044;
+  }
+  html,body{height:100%;}
+  body{
+    margin:0; font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "Liberation Sans";
+    background:var(--bg); color:var(--fg);
+  }
+  .wrap{max-width:1180px; margin:18px auto; padding:0 14px;}
+  h1{font-size:20px; margin:0 0 10px 0; font-weight:650;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 16px 0; line-height:1.35;}
+  .grid{display:grid; grid-template-columns: 380px 1fr; gap:14px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:12px;}
+  .card h2{font-size:14px; margin:0 0 10px 0; color:var(--fg); font-weight:650;}
+  label{display:block; font-size:12px; color:var(--muted); margin:10px 0 6px;}
+  select,input[type="range"],input[type="number"]{width:100%;}
+  select, input[type="number"]{
+    background:var(--panel2); border:1px solid var(--line); color:var(--fg);
+    padding:8px 9px; border-radius:10px; font-size:13px; outline:none;
+  }
+  input[type="range"]{accent-color:var(--accent);}
+  .row{display:grid; grid-template-columns: 1fr 1fr; gap:10px;}
+  .row3{display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px;}
+  .small{font-size:12px; color:var(--muted); margin-top:6px; line-height:1.35;}
+  .kv{display:grid; grid-template-columns: 1fr auto; gap:8px; align-items:baseline; border-top:1px dashed var(--line); padding-top:10px; margin-top:10px;}
+  .kv div{font-size:13px;}
+  .kv .k{color:var(--muted);}
+  .badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--line); background:rgba(255,255,255,0.02);}
+  .good{color:var(--good); border-color:rgba(126,231,135,0.35);}
+  .bad{color:var(--bad); border-color:rgba(255,107,107,0.35);}
+  .warn{color:var(--warn); border-color:rgba(255,204,102,0.35);}
+  .btn{
+    background:transparent; border:1px solid var(--line); color:var(--fg);
+    padding:8px 10px; border-radius:10px; cursor:pointer; font-size:13px;
+  }
+  .btn:hover{border-color:rgba(122,162,255,0.55);}
+  canvas{width:100%; height:420px; background:rgba(255,255,255,0.01); border:1px solid var(--line); border-radius:14px;}
+  .footer{margin-top:12px; color:var(--muted); font-size:12px; line-height:1.35;}
+  details{border:1px solid var(--line); border-radius:12px; padding:8px 10px; background:rgba(255,255,255,0.02);}
+  summary{cursor:pointer; color:var(--fg); font-weight:650;}
+  .hint{color:var(--muted); font-size:12px; margin:8px 0 0;}
+  code{background:rgba(255,255,255,0.05); padding:1px 6px; border-radius:6px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>NOS topology–margin demo</h1>
+  <p class="sub">
+    This demo visualises the <span class="badge">local linear surrogate</span> from your NOS appendix code:
+    build the 2N×2N block Jacobian with
+    <code>A11 = d̄ I + k W_eff</code>, <code>A12 = −I</code>, <code>A21 = (ab)I</code>, <code>A22 = −(a+μ)I</code>,
+    where <code>d̄ = f′(v*) + (β − λ − χ)</code>. For symmetric nonnegative W, the critical coupling scales like <code>k* ∝ 1/ρ(W_eff)</code>.
+  </p>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Controls</h2>
+
+      <label>Selected topology (highlight & regenerate)</label>
+      <select id="topology">
+        <option value="chain">Chain</option>
+        <option value="ring">Ring</option>
+        <option value="star">Star</option>
+        <option value="er">Erdős–Rényi</option>
+        <option value="ba">Scale-free (Barabási–Albert)</option>
+        <option value="sw">Small-world (Watts–Strogatz)</option>
+      </select>
+
+      <div class="row">
+        <div>
+          <label>N (nodes)</label>
+          <input id="N" type="range" min="20" max="400" step="1" value="120" />
+          <div class="small"><span id="Nval">120</span></div>
+        </div>
+        <div>
+          <label>Mean degree / k</label>
+          <input id="kdeg" type="range" min="2" max="40" step="1" value="6" />
+          <div class="small"><span id="kdegval">6</span></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label>Weight model</label>
+          <select id="wmodel">
+            <option value="binary">Binary (1 on edges)</option>
+            <option value="uniform">Uniform positive [0,1]</option>
+            <option value="gauss">Gaussian |N(0,1)|</option>
+          </select>
+        </div>
+        <div>
+          <label>Random seed</label>
+          <input id="seed" type="number" min="0" step="1" value="7" />
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label><input id="sym" type="checkbox" checked /> Symmetrise W</label>
+          <div class="small">Keeps eigenvalues real so the 2×2 mode reduction is exact.</div>
+        </div>
+        <div>
+          <label><input id="normrho" type="checkbox" /> Normalise to ρ(W)=1</label>
+          <div class="small">Useful to show that <code>k*ρ</code> stays constant.</div>
+        </div>
+      </div>
+
+      <label>Coupling gain k</label>
+      <input id="k" type="range" min="0" max="2.0" step="0.001" value="0.25" />
+      <div class="small">k = <span id="kval">0.250</span></div>
+
+      <details style="margin-top:12px;">
+        <summary>NOS operating point + parameters</summary>
+        <div class="hint">These map to the surrogate in <code>linearisation.py</code>. They do not run a spiking simulation.</div>
+
+        <div class="row3">
+          <div>
+            <label>v* (operating point)</label>
+            <input id="vstar" type="range" min="0" max="1.0" step="0.001" value="0.200" />
+            <div class="small"><span id="vstarval">0.200</span></div>
+          </div>
+          <div>
+            <label>α (saturation)</label>
+            <input id="alpha" type="range" min="0" max="1.0" step="0.001" value="0.000" />
+            <div class="small"><span id="alphaval">0.000</span></div>
+          </div>
+          <div>
+            <label>κ (saturation)</label>
+            <input id="kappa" type="range" min="0" max="10.0" step="0.001" value="0.000" />
+            <div class="small"><span id="kappaval">0.000</span></div>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>β</label>
+            <input id="beta" type="range" min="-2" max="2" step="0.001" value="0.000" />
+            <div class="small"><span id="betaval">0.000</span></div>
+          </div>
+          <div>
+            <label>λ (leak)</label>
+            <input id="lam" type="range" min="0" max="3" step="0.001" value="0.600" />
+            <div class="small"><span id="lamval">0.600</span></div>
+          </div>
+          <div>
+            <label>χ</label>
+            <input id="chi" type="range" min="0" max="3" step="0.001" value="0.000" />
+            <div class="small"><span id="chival">0.000</span></div>
+          </div>
+        </div>
+
+        <div class="row3">
+          <div>
+            <label>a</label>
+            <input id="a" type="range" min="0.01" max="5" step="0.001" value="1.000" />
+            <div class="small"><span id="aval">1.000</span></div>
+          </div>
+          <div>
+            <label>b</label>
+            <input id="b" type="range" min="0.01" max="5" step="0.001" value="0.800" />
+            <div class="small"><span id="bval">0.800</span></div>
+          </div>
+          <div>
+            <label>μ</label>
+            <input id="mu" type="range" min="0.0" max="5" step="0.001" value="0.500" />
+            <div class="small"><span id="muval">0.500</span></div>
+          </div>
+        </div>
+
+        <label><input id="ctn" type="checkbox" /> Use coupling through nonlinearity (deprecated)</label>
+        <label style="margin-top:8px;"><input id="xeff" type="checkbox" /> Plot x-axis as ρ(W<sub>eff</sub>) (moves points when enabled)</label>
+        <div class="hint">Tip: the <b>k</b> slider draws a horizontal line on the plot, so you can see whether <code>k</code> sits below <code>k*</code> for each topology.</div>
+
+        <div class="small">If enabled, the demo uses <code>W_eff = f′(v*) W</code>. Your public code deprecates this for the paper.</div>
+      </details>
+
+      <div style="display:flex; gap:10px; margin-top:12px;">
+        <button class="btn" id="regen">Regenerate W</button>
+        <button class="btn" id="scan">Scan presets</button>
+      </div>
+
+      <div id="status" class="small" style="margin-top:10px;"></div>
+
+      <div class="kv">
+        <div class="k">ρ(W) (raw)</div><div id="rhoRaw">–</div>
+        <div class="k">ρ(W_eff)</div><div id="rhoEff">–</div>
+        <div class="k">f′(v*)</div><div id="fp">–</div>
+        <div class="k">d̄ = f′ + (β − λ − χ)</div><div id="dbar">–</div>
+        <div class="k">k* (det bound)</div><div id="kdet">–</div>
+        <div class="k">k* (trace bound)</div><div id="ktr">–</div>
+        <div class="k">k* (active)</div><div id="kstar">–</div>
+        <div class="k">k ρ(W_eff)</div><div id="krho">–</div>
+        <div class="k">Status</div><div id="stability">–</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Plot: k* vs ρ(W)</h2>
+      <canvas id="plot" width="800" height="420"></canvas>
+      <div class="footer">
+        The straight line corresponds to <code>k* = C / ρ(W_eff)</code> with <code>C = min(a b/(a+μ) − d̄, (a+μ) − d̄)</code>.
+        This follows the symmetric-W block-Jacobian surrogate. It is a local condition around <code>v*</code>.
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ---------- RNG ---------- */
+function mulberry32(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------- Matrix helpers ---------- */
+function zeros(n){ return new Float64Array(n); }
+function matZeros(n){
+  const A = new Array(n);
+  for(let i=0;i<n;i++) A[i]=zeros(n);
+  return A;
+}
+function matCopy(A){
+  const n=A.length;
+  const B=new Array(n);
+  for(let i=0;i<n;i++){
+    B[i]=new Float64Array(A[i]);
+  }
+  return B;
+}
+function matSymmetrise(A){
+  const n=A.length;
+  for(let i=0;i<n;i++){
+    for(let j=i+1;j<n;j++){
+      const v = 0.5*(A[i][j] + A[j][i]);
+      A[i][j]=v; A[j][i]=v;
+    }
+  }
+}
+function matScale(A, s){
+  const n=A.length;
+  for(let i=0;i<n;i++){
+    const row=A[i];
+    for(let j=0;j<n;j++) row[j]*=s;
+  }
+}
+function matVec(A, x, out){
+  const n=A.length;
+  for(let i=0;i<n;i++){
+    let acc=0.0;
+    const row=A[i];
+    for(let j=0;j<n;j++) acc += row[j]*x[j];
+    out[i]=acc;
+  }
+}
+function dot(x,y){
+  let s=0.0;
+  for(let i=0;i<x.length;i++) s += x[i]*y[i];
+  return s;
+}
+function norm2(x){ return Math.sqrt(dot(x,x)); }
+
+/* Power iteration for symmetric nonnegative matrices */
+function spectralRadius(A, iters=60){
+  const n=A.length;
+  let x=zeros(n);
+  for(let i=0;i<n;i++) x[i]=1.0/n;
+  let y=zeros(n);
+  let lam=0.0;
+  for(let t=0;t<iters;t++){
+    matVec(A,x,y);
+    const ny = norm2(y);
+    if(ny===0) return 0.0;
+    for(let i=0;i<n;i++) x[i]=y[i]/ny;
+    matVec(A,x,y);
+    lam = dot(x,y); // Rayleigh quotient for symmetric A
+  }
+  return Math.abs(lam);
+}
+
+/* ---------- Graph builders (nonnegative) ---------- */
+function setWeight(A, i, j, w){
+  A[i][j]=w;
+}
+function addEdge(A, i, j, w){
+  if(i===j) return;
+  A[i][j]=w;
+}
+function weightSample(rng, model){
+  if(model==="binary") return 1.0;
+  if(model==="uniform") return rng();
+  // gauss abs via Box–Muller
+  let u=1e-12 + rng();
+  let v=1e-12 + rng();
+  let z = Math.sqrt(-2.0*Math.log(u))*Math.cos(2.0*Math.PI*v);
+  return Math.abs(z);
+}
+function buildChain(n, rng, wmodel){
+  const A=matZeros(n);
+  for(let i=0;i<n-1;i++){
+    const w=weightSample(rng,wmodel);
+    addEdge(A,i,i+1,w);
+    addEdge(A,i+1,i,w);
+  }
+  return A;
+}
+function buildRing(n, kdeg, rng, wmodel){
+  const A=matZeros(n);
+  const k = Math.max(2, kdeg|0);
+  const half = Math.floor(k/2);
+  for(let i=0;i<n;i++){
+    for(let d=1; d<=half; d++){
+      const j=(i+d)%n;
+      const w=weightSample(rng,wmodel);
+      addEdge(A,i,j,w); addEdge(A,j,i,w);
+    }
+  }
+  return A;
+}
+function buildStar(n, rng, wmodel){
+  const A=matZeros(n);
+  const c=0;
+  for(let i=1;i<n;i++){
+    const w=weightSample(rng,wmodel);
+    addEdge(A,c,i,w); addEdge(A,i,c,w);
+  }
+  return A;
+}
+function buildER(n, kdeg, rng, wmodel){
+  const A=matZeros(n);
+  const p = Math.min(1.0, Math.max(0.0, kdeg/(n-1)));
+  for(let i=0;i<n;i++){
+    for(let j=i+1;j<n;j++){
+      if(rng() < p){
+        const w=weightSample(rng,wmodel);
+        addEdge(A,i,j,w); addEdge(A,j,i,w);
+      }
+    }
+  }
+  return A;
+}
+function buildBA(n, kdeg, rng, wmodel){
+  // Preferential attachment. m ~ kdeg/2.
+  const m = Math.max(1, Math.floor(kdeg/2));
+  const m0 = Math.max(m+1, 4);
+  const A=matZeros(n);
+  // start with clique on m0
+  let deg=new Float64Array(n);
+  for(let i=0;i<m0;i++){
+    for(let j=i+1;j<m0;j++){
+      const w=weightSample(rng,wmodel);
+      addEdge(A,i,j,w); addEdge(A,j,i,w);
+      deg[i]+=1; deg[j]+=1;
+    }
+  }
+  let sumDeg=0;
+  for(let i=0;i<m0;i++) sumDeg+=deg[i];
+
+  for(let node=m0; node<n; node++){
+    const targets=new Set();
+    while(targets.size < m){
+      // sample proportional to degree (linear preferential)
+      const r = rng()*sumDeg;
+      let acc=0, pick=0;
+      for(let i=0;i<node;i++){
+        acc += deg[i];
+        if(acc >= r){ pick=i; break; }
+      }
+      targets.add(pick);
+    }
+    for(const t of targets){
+      const w=weightSample(rng,wmodel);
+      addEdge(A,node,t,w); addEdge(A,t,node,w);
+      deg[node]+=1; deg[t]+=1;
+      sumDeg += 2;
+    }
+  }
+  return A;
+}
+function buildSW(n, kdeg, rng, wmodel){
+  // Watts–Strogatz: start ring-lattice with kdeg, rewire prob p=0.1
+  const pRewire=0.10;
+  const k = Math.max(2, kdeg|0);
+  const half = Math.floor(k/2);
+  const A=matZeros(n);
+  for(let i=0;i<n;i++){
+    for(let d=1; d<=half; d++){
+      let j=(i+d)%n;
+      if(rng()<pRewire){
+        // rewire
+        let cand = Math.floor(rng()*n);
+        while(cand===i) cand = Math.floor(rng()*n);
+        j=cand;
+      }
+      const w=weightSample(rng,wmodel);
+      addEdge(A,i,j,w); addEdge(A,j,i,w);
+    }
+  }
+  return A;
+}
+
+/* ---------- NOS surrogate maths (matches linearisation.py) ---------- */
+function fprimeSat(v, alpha, kappa){
+  const den = 1.0 + kappa*v*v;
+  return (2.0*alpha*v) / (den*den);
+}
+function dbarFrom(vstar, alpha, kappa, beta, lam, chi){
+  return fprimeSat(vstar,alpha,kappa) + (beta - lam - chi);
+}
+function kStarBounds(rhoEff, dbar, a, b, mu){
+  if(rhoEff<=0) return {kdet:NaN, ktr:NaN, kstar:NaN, which:"none"};
+  const c_det = (a*b)/(a+mu) - dbar;
+  const c_tr  = (a+mu) - dbar;
+  const kdet = c_det / rhoEff;
+  const ktr  = c_tr / rhoEff;
+  let kstar = Math.min(kdet, ktr);
+  let which = (kdet<=ktr) ? "det" : "trace";
+  return {kdet, ktr, kstar, which, c_det, c_tr};
+}
+
+/* ---------- Plot ---------- */
+const canvas = document.getElementById("plot");
+const ctx = canvas.getContext("2d");
+
+function drawPlot(points, lineC, kLine, xLabel="ρ(W)", yLabel="k*"){
+  const W=canvas.width, H=canvas.height;
+  ctx.clearRect(0,0,W,H);
+
+  // bounds
+  let xmin=0.2, xmax=0.0, ymin=1e9, ymax=0.0;
+  for(const p of points){
+    xmin=Math.min(xmin,p.x); xmax=Math.max(xmax,p.x);
+    ymin=Math.min(ymin,p.y); ymax=Math.max(ymax,p.y);
+  }
+  if(!isFinite(ymin) || !isFinite(ymax)){ ymin=0; ymax=1; }
+  xmin = Math.max(1e-6, xmin*0.92);
+  xmax = Math.max(xmin*1.2, xmax*1.08);
+  ymin = Math.max(0, ymin*0.85);
+  ymax = Math.max(ymin+1e-6, ymax*1.15);
+
+  const padL=56, padR=14, padT=14, padB=44;
+  const x2px = x => padL + (x-xmin)/(xmax-xmin)*(W-padL-padR);
+  const y2py = y => padT + (1-(y-ymin)/(ymax-ymin))*(H-padT-padB);
+
+  // axes
+  ctx.strokeStyle="rgba(159,176,192,0.35)";
+  ctx.lineWidth=1;
+  ctx.beginPath();
+  ctx.moveTo(padL,padT); ctx.lineTo(padL,H-padB); ctx.lineTo(W-padR,H-padB);
+  ctx.stroke();
+
+  // line y = C/x
+  ctx.strokeStyle="rgba(122,162,255,0.55)";
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  const steps=220;
+  for(let i=0;i<=steps;i++){
+    const x = xmin + (xmax-xmin)*i/steps;
+    const y = lineC / x;
+    const px=x2px(x), py=y2py(y);
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+
+  // horizontal k line (current coupling gain)
+  if(isFinite(kLine)){
+    const y = kLine;
+    const py = y2py(y);
+    ctx.strokeStyle="rgba(255,204,102,0.55)";
+    ctx.lineWidth=1.5;
+    ctx.setLineDash([6,4]);
+    ctx.beginPath();
+    ctx.moveTo(padL, py);
+    ctx.lineTo(W-padR, py);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle="rgba(255,204,102,0.85)";
+    ctx.font="12px ui-sans-serif, system-ui";
+    ctx.fillText("k", W-padR-16, py-6);
+  }
+
+  // points
+  for(const p of points){
+    const px=x2px(p.x), py=y2py(p.y);
+    ctx.fillStyle="rgba(231,236,243,0.95)";
+    ctx.beginPath(); ctx.arc(px,py,4.2,0,2*Math.PI); ctx.fill();
+    ctx.fillStyle="rgba(159,176,192,0.9)";
+    ctx.font="12px ui-sans-serif, system-ui";
+    ctx.fillText(p.label, px+7, py-7);
+  }
+
+  // labels
+  ctx.fillStyle="rgba(159,176,192,0.9)";
+  ctx.font="13px ui-sans-serif, system-ui";
+  ctx.fillText(xLabel, (padL+W-padR)/2 - 18, H-14);
+  ctx.save();
+  ctx.translate(16,(padT+H-padB)/2+24);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText(yLabel, 0, 0);
+  ctx.restore();
+
+  // ticks (few)
+  function tick(v, prec){ return v.toFixed(prec); }
+  ctx.fillStyle="rgba(159,176,192,0.65)";
+  ctx.font="12px ui-sans-serif, system-ui";
+
+  for(let t=0;t<=4;t++){
+    const x=xmin+(xmax-xmin)*t/4;
+    const px=x2px(x);
+    ctx.fillText(tick(x,2), px-10, H-padB+18);
+  }
+  for(let t=0;t<=4;t++){
+    const y=ymin+(ymax-ymin)*t/4;
+    const py=y2py(y);
+    ctx.fillText(tick(y,2), 8, py+4);
+  }
+}
+
+/* ---------- App state ---------- */
+let currentW = null;
+let currentRhoRaw = 0.0;
+
+// Scan mode keeps the preset set visible and recomputes k* when NOS params change.
+let scanMode = false;
+let scanCache = []; // [{key,label,rhoRaw}]
+
+let regenPending = false;
+function requestRegen(){
+  if(regenPending) return;
+  regenPending = true;
+  requestAnimationFrame(()=>{
+    regenPending = false;
+    regenerate();
+  });
+}
+
+function readNum(id){ return parseFloat(document.getElementById(id).value); }
+function readInt(id){ return parseInt(document.getElementById(id).value,10); }
+function setText(id, s){ document.getElementById(id).textContent = s; }
+function fmt(x, d=4){
+  if(!isFinite(x)) return "–";
+  return x.toFixed(d);
+}
+
+function buildWFromUI(topOverride=null){
+  const topo = topOverride || document.getElementById("topology").value;
+  const N = readInt("N");
+  const kdeg = readInt("kdeg");
+  const seed = readInt("seed");
+  const wmodel = document.getElementById("wmodel").value;
+  const sym = document.getElementById("sym").checked;
+  const rng = mulberry32((seed + 10007) ^ (N*2654435761));
+  let W=null;
+
+  if(topo==="chain") W=buildChain(N, rng, wmodel);
+  else if(topo==="ring") W=buildRing(N, kdeg, rng, wmodel);
+  else if(topo==="star") W=buildStar(N, rng, wmodel);
+  else if(topo==="er") W=buildER(N, kdeg, rng, wmodel);
+  else if(topo==="ba") W=buildBA(N, kdeg, rng, wmodel);
+  else W=buildSW(N, kdeg, rng, wmodel);
+
+  if(sym) matSymmetrise(W);
+
+  // Compute rho before normalisation
+  const rho = spectralRadius(W, 70);
+
+  // optional normalise
+  const normrho = document.getElementById("normrho").checked;
+  if(normrho && rho>0){
+    matScale(W, 1.0/rho);
+  }
+  return {W, rhoRaw: rho};
+}
+
+
+function computeLocalConstants(){
+  const vstar = readNum("vstar");
+  const alpha = readNum("alpha");
+  const kappa = readNum("kappa");
+  const beta  = readNum("beta");
+  const lam   = readNum("lam");
+  const chi   = readNum("chi");
+  const a     = readNum("a");
+  const b     = readNum("b");
+  const mu    = readNum("mu");
+  const ctn   = document.getElementById("ctn").checked;
+
+  const fp   = fprimeSat(vstar, alpha, kappa);
+  const dbar = dbarFrom(vstar, alpha, kappa, beta, lam, chi);
+
+  const c_det = (a*b)/(a+mu) - dbar;
+  const c_tr  = (a+mu) - dbar;
+  const c0    = Math.min(c_det, c_tr);
+  const C     = c0 / (ctn ? Math.max(1e-12, Math.abs(fp)) : 1.0);
+
+  return {vstar, alpha, kappa, beta, lam, chi, a, b, mu, ctn, fp, dbar, c_det, c_tr, c0, C};
+}
+
+function boundsForRhoRaw(rhoRaw, cons){
+  const rhoEff = cons.ctn ? Math.abs(cons.fp) * rhoRaw : rhoRaw;
+  const bounds = kStarBounds(rhoEff, cons.dbar, cons.a, cons.b, cons.mu);
+  return {rhoEff, bounds};
+}
+
+function ensureCurrentW(){
+  if(currentW!==null) return;
+  const built = buildWFromUI();
+  currentW = built.W;
+  currentRhoRaw = built.rhoRaw;
+}
+
+function update(){
+  // UI labels
+  setText("Nval", String(readInt("N")));
+  setText("kdegval", String(readInt("kdeg")));
+  setText("kval", fmt(readNum("k"),3));
+  setText("vstarval", fmt(readNum("vstar"),3));
+  setText("alphaval", fmt(readNum("alpha"),3));
+  setText("kappaval", fmt(readNum("kappa"),3));
+  setText("betaval", fmt(readNum("beta"),3));
+  setText("lamval", fmt(readNum("lam"),3));
+  setText("chival", fmt(readNum("chi"),3));
+  setText("aval", fmt(readNum("a"),3));
+  setText("bval", fmt(readNum("b"),3));
+  setText("muval", fmt(readNum("mu"),3));
+
+  ensureCurrentW();
+
+  const cons = computeLocalConstants();
+  const cur = boundsForRhoRaw(currentRhoRaw, cons);
+
+  const k = readNum("k");
+  const krho = k * cur.rhoEff;
+  const stable = (isFinite(cur.bounds.kstar) && k < cur.bounds.kstar);
+  const status = stable ? "stable (linear surrogate)" : "unstable (linear surrogate)";
+  const badgeClass = stable ? "good" : "bad";
+
+  // output text (for selected topology)
+  setText("rhoRaw", fmt(currentRhoRaw,4));
+
+  const rhoEffLabel = fmt(cur.rhoEff,4) + (cons.ctn ? "  (includes f′)" : "");
+  setText("rhoEff", rhoEffLabel);
+
+  setText("fp", fmt(cons.fp,6));
+  setText("dbar", fmt(cons.dbar,4));
+  setText("kdet", fmt(cur.bounds.kdet,4));
+  setText("ktr", fmt(cur.bounds.ktr,4));
+  setText("kstar", fmt(cur.bounds.kstar,4) + (isFinite(cur.bounds.kstar) ? ("  [" + cur.bounds.which + " bound]") : ""));
+  setText("krho", fmt(krho,4));
+  document.getElementById("stability").innerHTML = `<span class="badge ${badgeClass}">${status}</span>`;
+
+  // Plot points
+  const xEff = document.getElementById("xeff").checked;
+  const xLabel = xEff ? "ρ(W_eff)" : "ρ(W) (raw)";
+
+  // line constant for y = C/x on the chosen x-axis
+  // Always bound against ρ(W_eff); switching x-axis changes whether the |f'| factor is inside x or inside C.
+  const lineC = xEff ? cons.c0 : cons.C;
+
+  let pts = [];
+  if(scanMode && scanCache.length){
+    for(const item of scanCache){
+      const bi = boundsForRhoRaw(item.rhoRaw, cons); // bi.rhoEff, bi.bounds.kstar
+      const x = xEff ? bi.rhoEff : item.rhoRaw;
+      pts.push({x, y:bi.bounds.kstar, label:item.label, key:item.key});
+    }
+  }else{
+    const x = xEff ? cur.rhoEff : currentRhoRaw;
+    pts = [{
+      x,
+      y: cur.bounds.kstar,
+      label: document.getElementById("topology").selectedOptions[0].text,
+      key: document.getElementById("topology").value
+    }];
+  }
+
+  // highlight selected topology in scan mode by drawing it last (simple and robust)
+  if(scanMode && pts.length){
+    const sel = document.getElementById("topology").value;
+    const rest = pts.filter(p=>p.key!==sel);
+    const hi   = pts.filter(p=>p.key===sel);
+    pts = rest.concat(hi);
+  }
+
+  drawPlot(pts, lineC, k, xLabel, "k*");
+
+  const normrho = document.getElementById("normrho").checked;
+    const msg = scanMode
+    ? "Overlay on: all topology presets are shown. The dropdown selects which one is highlighted and used for the numeric readout."
+    : "Overlay off: only the selected topology is shown.";
+
+  const axisMsg = document.getElementById("xeff").checked
+    ? " The x-axis is ρ(W_eff). With coupling-through-nonlinearity enabled, changing v* moves points horizontally."
+    : " The x-axis is raw ρ(W). Changing v* and node parameters shifts k* (vertical), but ρ(W) stays fixed.";
+
+  const normMsg = normrho
+    ? " Note: W is scaled to ρ(W)=1 for internal construction when normalisation is enabled, but the demo still reports the raw ρ(W) of the unscaled graph."
+    : "";
+
+  setText("status", msg + axisMsg + normMsg);
+}
+
+function rebuildScanCache(){
+  const presets = [
+    ["chain","Chain"],
+    ["ring","Ring"],
+    ["star","Star"],
+    ["er","E-R"],
+    ["ba","Scale-free"],
+    ["sw","Small-world"]
+  ];
+  const next = [];
+  for(const pr of presets){
+    const built = buildWFromUI(pr[0]);
+    next.push({key: pr[0], label: pr[1], rhoRaw: built.rhoRaw});
+  }
+  scanCache = next;
+}
+
+function regenerate(){
+  const built = buildWFromUI();
+  currentW = built.W;
+  currentRhoRaw = built.rhoRaw;
+
+  if(scanMode){
+    rebuildScanCache();
+  }
+  update();
+}
+
+function scanPresets(){
+  // toggle overlay
+  scanMode = !scanMode;
+  const btn = document.getElementById("scan");
+  if(scanMode){
+    rebuildScanCache();
+    btn.textContent = "Hide presets";
+  }else{
+    btn.textContent = "Scan presets";
+  }
+  update();
+}
+
+
+/* wire UI */
+const regenControls = new Set(["topology","N","kdeg","wmodel","seed","sym","normrho"]);
+const allControls = ["topology","N","kdeg","wmodel","seed","sym","normrho","k","vstar","alpha","kappa","beta","lam","chi","a","b","mu","ctn","xeff"];
+
+for(const id of allControls){
+  const el = document.getElementById(id);
+  el.addEventListener("input", ()=>{
+    // keep labels responsive, and rebuild W on the next frame when needed
+    update();
+    if(regenControls.has(id)) requestRegen();
+  });
+  el.addEventListener("change", ()=>{
+    if(regenControls.has(id)) regenerate();
+    else update();
+  });
+}
+
+document.getElementById("regen").addEventListener("click", regenerate);
+document.getElementById("scan").addEventListener("click", scanPresets);
+
+// Start in scan mode so the demo immediately shows the topology spread.
+scanPresets();
+</script>
+</body>
+</html>

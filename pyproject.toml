@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nos-snn"
+version = "0.1.0"
+description = "Network-Optimised Spiking (NOS): reference code, experiments, and demos."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+authors = [{name = "Muhammad Bilal"}]
+dependencies = [
+  "numpy",
+  "scipy",
+  "networkx",
+  "pandas",
+  "matplotlib",
+  "tqdm",
+]
+
+[tool.setuptools]
+py-modules = ["nos", "topology", "linearisation", "metrics"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

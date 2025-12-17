@@ -14,7 +14,7 @@ NOS is a compact two-state spiking model for event-driven networking. The state 
 ## Repository layout
 
 - `src/`  
-  Core Python modules used across experiments (for example: `src/nos.py`, `src/topology.py`, `src/linearisation.py`, `src/metrics.py`).
+  Python modules used across experiments ( `src/nos.py`, `src/topology.py`, `src/linearisation.py`, `src/metrics.py`).
 
 - `notebooks/`  
   Main Jupyter notebooks (01–11) used to generate paper figures and tables.
@@ -22,11 +22,7 @@ NOS is a compact two-state spiking model for event-driven networking. The state 
 - `ablation/`  
   Ablation scripts that mirror notebook pipelines.
 
-- `docs/`  
-  GitHub Pages site (landing page + demos).
 
-- `docs/demos/`  
-  The three interactive HTML demos.
 
 ## Quick start
 
